@@ -1,4 +1,4 @@
-// DOM Elements (Ab inko DOMContentLoaded ke andar define karenge)
+// --- DOM Elements & Global Variables ---
 let taskForm;
 let searchInput;
 let filterStartDate;
@@ -8,66 +8,51 @@ let exportBtn;
 let importBtn;
 let importInput;
 
-let taskLists = {}; // Initialize as empty object, will populate inside DOMContentLoaded
-
-let tasks = []; // Initialize as empty array, will try to load from localStorage below
+let taskLists = {}; 
+let tasks = []; 
 let editingTaskId = null;
+let lastAutoPausedTaskId = null; // Stores the ID of the task we auto-paused
 
-// Function to load tasks from localStorage safely
+// --- Data Loading & Saving ---
 function loadTasks() {
   try {
     const storedTasks = localStorage.getItem('tasks');
     if (storedTasks) {
       const parsedTasks = JSON.parse(storedTasks);
-      // Basic validation for loaded tasks
       if (Array.isArray(parsedTasks) && parsedTasks.every(task => typeof task === 'object' && task !== null && 'id' in task && 'title' in task)) {
-        // Adapt old task formats if necessary
         tasks = parsedTasks.map(task => {
-            // Ensure tags is a string
             if (Array.isArray(task.tags)) {
                 task.tags = task.tags.join(',');
             } else if (typeof task.tags !== 'string') {
-                task.tags = ''; // Default to empty string if not array or string
+                task.tags = ''; 
             }
-
-            // Map timeSpent to timeTracked if timeTracked is missing
             if (typeof task.timeTracked === 'undefined' && typeof task.timeSpent === 'number') {
                 task.timeTracked = task.timeSpent;
             } else if (typeof task.timeTracked !== 'number') {
-                task.timeTracked = 0; // Default to 0 if not a number
+                task.timeTracked = 0; 
             }
-
-            // Ensure history array exists
             task.history = Array.isArray(task.history) ? task.history : [];
-
+            task.lastModified = task.lastModified || 0;
             return task;
         });
-        console.log('Tasks loaded from localStorage successfully:', tasks);
       } else {
-        console.warn('Stored tasks in localStorage are not in expected format. Resetting tasks.');
-        showCustomAlert('Error: Saved tasks are corrupted. Resetting tasks. Please check your backup file.');
+        showCustomAlert('Error: Saved tasks are corrupted. Resetting tasks.');
         tasks = [];
-        localStorage.removeItem('tasks'); // Clear corrupted data
+        localStorage.removeItem('tasks'); 
       }
-    } else {
-      tasks = [];
-      console.log('No tasks found in localStorage. Starting with empty array.');
     }
   } catch (e) {
-    console.error('Error loading tasks from localStorage:', e);
-    showCustomAlert('Error loading your tasks. Your saved data might be corrupted. Starting fresh.');
-    tasks = []; // Reset tasks if data is corrupted
-    localStorage.removeItem('tasks'); // Remove corrupted data
+    showCustomAlert('Error loading your tasks. Starting fresh.');
+    tasks = []; 
+    localStorage.removeItem('tasks'); 
   }
 }
 
 function saveTasks() {
   try {
     localStorage.setItem('tasks', JSON.stringify(tasks));
-    console.log('Tasks saved to localStorage:', tasks);
   } catch (e) {
-    console.error('Error saving tasks to localStorage:', e);
-    showCustomAlert('Error saving your tasks. Please check your browser settings or disk space.');
+    showCustomAlert('Error saving your tasks.');
   }
 }
 
@@ -83,12 +68,10 @@ function formatDuration(ms) {
   return `${h}h ${m}m ${s}s`;
 }
 
-// Helper to format a date object to a readable string (e.g., "YYYY-MM-DD HH:MM")
 function formatDateTime(date) {
     if (!date) return '';
     const d = new Date(date);
-    if (isNaN(d.getTime())) return ''; // Invalid date
-
+    if (isNaN(d.getTime())) return ''; 
     const year = d.getFullYear();
     const month = (d.getMonth() + 1).toString().padStart(2, '0');
     const day = d.getDate().toString().padStart(2, '0');
@@ -97,66 +80,43 @@ function formatDateTime(date) {
     return `${year}-${month}-${day} ${hours}:${minutes}`;
 }
 
-
+// --- Rendering & UI ---
 function renderTasks() {
-  // Ensure taskLists is populated before use
-  if (Object.keys(taskLists).length === 0) {
-      console.warn('taskLists is not yet populated. Skipping renderTasks.');
-      return;
-  }
+  if (Object.keys(taskLists).length === 0) return;
 
-  // Har list ko pehle khali karo
-  // Aur count ke liye ek object banayein
-  const taskCounts = {
-    Upcoming: 0,
-    Running: 0,
-    Paused: 0,
-    Completed: 0,
-    OnHold: 0,
-    Canceled: 0
-  };
+  const taskCounts = { Upcoming: 0, Running: 0, Paused: 0, Completed: 0, OnHold: 0, Canceled: 0 };
 
   Object.values(taskLists).forEach(list => {
-    if (list) { // Check if list element exists
-      list.innerHTML = '';
-    }
+    if (list) list.innerHTML = '';
   });
 
   const query = searchInput.value.toLowerCase();
   const startFilter = filterStartDate.value;
   const endFilter = filterEndDate.value;
 
-  console.log('Rendering tasks. Total tasks:', tasks.length, 'Filters:', { query, startFilter, endFilter });
-
   if (tasks.length === 0) {
-      console.log('No tasks to render.');
-      // Agar koi tasks nahi hain toh bhi counts update karein
       updateSectionHeaders(taskCounts);
       return;
   }
 
-  tasks.forEach(task => {
-    // Ensure task properties exist and are converted to string before toLowerCase()
+  // Sort tasks so recently modified ones appear at the top
+  const sortedTasks = [...tasks].sort((a, b) => (b.lastModified || 0) - (a.lastModified || 0));
+
+  sortedTasks.forEach(task => {
     const taskTitle = (task.title || '').toLowerCase();
     const taskDescription = (task.description || '').toLowerCase();
-    // FIX: Ensure task.tags is a string before calling toLowerCase()
     const taskTags = (Array.isArray(task.tags) ? task.tags.join(',') : (task.tags || '')).toLowerCase();
 
-    const matchesSearch = [taskTitle, taskDescription, taskTags].some(field =>
-      field.includes(query)
-    );
+    const matchesSearch = [taskTitle, taskDescription, taskTags].some(field => field.includes(query));
     const matchesDate =
       (!startFilter || (task.dueDate && task.dueDate >= startFilter)) &&
       (!endFilter || (task.dueDate && task.dueDate <= endFilter));
 
-    if (!matchesSearch || !matchesDate) {
-      console.log(`Task "${task.title}" filtered out. Matches search: ${matchesSearch}, Matches date: ${matchesDate}`);
-      return;
-    }
+    if (!matchesSearch || !matchesDate) return;
 
     const card = document.createElement('div');
-    card.className = `task-card ${task.status ? task.status.toLowerCase() : 'upcoming'}`; // Default to upcoming if status is missing
-    card.dataset.taskId = task.id; // Task ID ko data attribute mein store karo
+    card.className = `task-card ${task.status ? task.status.toLowerCase() : 'upcoming'}`;
+    card.dataset.taskId = task.id; 
     card.innerHTML = `
       <h4>${task.title || 'Untitled Task'}</h4>
       <p>${task.description || 'No description'}</p>
@@ -168,8 +128,6 @@ function renderTasks() {
     `;
 
     const actions = card.querySelector('.actions');
-
-    // Button banane ka helper function
     const addButton = (label, handler, color = '#0078d4') => {
       const btn = document.createElement('button');
       btn.textContent = label;
@@ -178,7 +136,6 @@ function renderTasks() {
       actions.appendChild(btn);
     };
 
-    // Task status ke hisaab se buttons dikhana
     switch (task.status) {
       case 'Upcoming':
         addButton('Start', startTask, 'orange');
@@ -189,85 +146,61 @@ function renderTasks() {
         break;
       case 'Paused':
         addButton('Resume', resumeTask, 'orange');
-        addButton('Complete', completeTask, 'green'); // Ab Paused task bhi direct complete ho sakta hai
+        addButton('Complete', completeTask, 'green'); 
         break;
       case 'Completed':
         addButton('Restart', restartTask, 'red');
         break;
-      case 'OnHold': // Naya: On Hold tasks ke liye buttons
+      case 'OnHold': 
         addButton('Resume', resumeTask, 'orange');
         addButton('Complete', completeTask, 'green');
         break;
-      default: // Agar status unknown hai toh bhi buttons dikhao
+      default: 
         addButton('Start', startTask, 'orange');
         break;
     }
 
-    // "Hold" aur "Cancel" buttons, jo Completed aur Canceled tasks par nahi dikhenge
     if (task.status !== 'Completed' && task.status !== 'Canceled') {
-        addButton('Hold', holdTask, 'purple'); // Naya Hold button
-        addButton('Cancel', cancelTask, 'gray'); // Naya Cancel button
+        addButton('Hold', holdTask, 'purple'); 
+        addButton('Cancel', cancelTask, 'gray'); 
     }
 
-    // Common buttons jo har task par dikhenge
     addButton('Edit', editTask, '#6c757d');
     addButton('Delete', deleteTask, '#dc3545');
 
-    // Task ko uski sahi category mein add karo
     if (taskLists[task.status]) {
       taskLists[task.status].appendChild(card);
-      // Count update karein
       taskCounts[task.status]++;
-      console.log(`Task "${task.title}" added to "${task.status}" list.`);
     } else {
-      // Agar status unknown hai, toh Upcoming mein add karein
       taskLists.Upcoming.appendChild(card);
-      taskCounts.Upcoming++; // Upcoming count update karein
-      console.warn(`Unknown status "${task.status}" for task: "${task.title}". Added to Upcoming.`);
+      taskCounts.Upcoming++; 
     }
   });
 
-  // Sabhi section headers ko update karein counts ke saath
   updateSectionHeaders(taskCounts);
 }
 
-// Naya function: Section headers ko update karna
 function updateSectionHeaders(counts) {
   document.querySelectorAll('.task-column h3').forEach(header => {
-    const sectionId = header.parentElement.id; // task-column ki ID
-    const sectionTitleTextSpan = header.querySelector('.section-title-text'); // Naya span element
-    const collapseIcon = header.querySelector('.collapse-icon'); // + / - icon
+    const sectionId = header.parentElement.id;
+    const sectionTitleTextSpan = header.querySelector('.section-title-text');
+    const collapseIcon = header.querySelector('.collapse-icon');
 
-    if (!sectionTitleTextSpan || !collapseIcon) {
-        console.warn('Section title text span or collapse icon not found for header:', header);
-        return; // Agar elements nahi mile toh skip karein
-    }
+    if (!sectionTitleTextSpan || !collapseIcon) return;
 
-    // Original text (emoji ke bina)
     let originalBaseText = '';
-    if (sectionId === 'upcomingTasks') originalBaseText = 'Upcoming';
-    else if (sectionId === 'runningTasks') originalBaseText = 'Running';
-    else if (sectionId === 'pausedTasks') originalBaseText = 'Paused';
-    else if (sectionId === 'onHoldTasks') originalBaseText = 'On Hold';
-    else if (sectionId === 'completedTasks') originalBaseText = 'Completed';
-    else if (sectionId === 'canceledTasks') originalBaseText = 'Canceled';
-
-    // Add emoji back based on sectionId
     let emoji = '';
-    if (sectionId === 'upcomingTasks') emoji = '🔴';
-    else if (sectionId === 'runningTasks') emoji = '🟠';
-    else if (sectionId === 'pausedTasks') emoji = '🟡';
-    else if (sectionId === 'onHoldTasks') emoji = '🟣';
-    else if (sectionId === 'completedTasks') emoji = '🟢';
-    else if (sectionId === 'canceledTasks') emoji = '⚫';
+    
+    if (sectionId === 'upcomingTasks') { originalBaseText = 'Upcoming'; emoji = '🔴'; }
+    else if (sectionId === 'runningTasks') { originalBaseText = 'Running'; emoji = '🟠'; }
+    else if (sectionId === 'pausedTasks') { originalBaseText = 'Paused'; emoji = '🟡'; }
+    else if (sectionId === 'onHoldTasks') { originalBaseText = 'On Hold'; emoji = '🟣'; }
+    else if (sectionId === 'completedTasks') { originalBaseText = 'Completed'; emoji = '🟢'; }
+    else if (sectionId === 'canceledTasks') { originalBaseText = 'Canceled'; emoji = '⚫'; }
 
     const count = counts[Object.keys(taskLists).find(key => taskLists[key].parentElement.id === sectionId)] || 0;
-    
-    // section-title-text span ke content ko update karein
     sectionTitleTextSpan.textContent = `${originalBaseText} - (${count} Tasks)`;
 
-    // Emoji ko h3 ke first child node mein rakhein
-    // Agar h3 ka first child text node hai, toh use update karein, warna naya text node banayein
     if (header.firstChild && header.firstChild.nodeType === Node.TEXT_NODE) {
         header.firstChild.nodeValue = `${emoji} `;
     } else {
@@ -275,7 +208,6 @@ function updateSectionHeaders(counts) {
         header.insertBefore(emojiNode, sectionTitleTextSpan);
     }
 
-    // Collapse icon ki state ko maintain karein
     const taskList = header.nextElementSibling;
     if (taskList && taskList.classList.contains('collapsed')) {
         collapseIcon.textContent = '+';
@@ -285,13 +217,14 @@ function updateSectionHeaders(counts) {
   });
 }
 
-
+// --- Task Actions ---
 function startTask(id) {
   const task = tasks.find(t => t.id === id);
   if (!task) return;
   task.status = 'Running';
   task.lastStart = Date.now();
-  task.history = task.history || []; // Ensure history array exists
+  task.lastModified = Date.now();
+  task.history = task.history || []; 
   task.history.push({ action: 'Start', timestamp: new Date().toISOString() });
   saveTasks();
   renderTasks();
@@ -305,7 +238,8 @@ function pauseTask(id) {
     task.timeTracked = (task.timeTracked || 0) + (Date.now() - task.lastStart);
     task.lastStart = null; 
   }
-  task.history = task.history || []; // Ensure history array exists
+  task.lastModified = Date.now();
+  task.history = task.history || []; 
   task.history.push({ action: 'Pause', timestamp: new Date().toISOString() });
   saveTasks();
   renderTasks();
@@ -316,7 +250,8 @@ function resumeTask(id) {
   if (!task) return;
   task.status = 'Running';
   task.lastStart = Date.now();
-  task.history = task.history || []; // Ensure history array exists
+  task.lastModified = Date.now();
+  task.history = task.history || []; 
   task.history.push({ action: 'Resume', timestamp: new Date().toISOString() });
   saveTasks();
   renderTasks();
@@ -330,8 +265,9 @@ function completeTask(id) {
     task.timeTracked = (task.timeTracked || 0) + (Date.now() - task.lastStart);
     task.lastStart = null; 
   }
-  task.completedAt = new Date().toISOString(); // Set completion date and time
-  task.history = task.history || []; // Ensure history array exists
+  task.completedAt = new Date().toISOString(); 
+  task.lastModified = Date.now();
+  task.history = task.history || []; 
   task.history.push({ action: 'Complete', timestamp: task.completedAt });
   saveTasks();
   renderTasks();
@@ -345,7 +281,8 @@ function holdTask(id) {
     task.lastStart = null; 
   }
   task.status = 'OnHold';
-  task.history = task.history || []; // Ensure history array exists
+  task.lastModified = Date.now();
+  task.history = task.history || []; 
   task.history.push({ action: 'Hold', timestamp: new Date().toISOString() });
   saveTasks();
   renderTasks();
@@ -359,7 +296,8 @@ function cancelTask(id) {
     task.lastStart = null; 
   }
   task.status = 'Canceled';
-  task.history = task.history || []; // Ensure history array exists
+  task.lastModified = Date.now();
+  task.history = task.history || []; 
   task.history.push({ action: 'Cancel', timestamp: new Date().toISOString() });
   saveTasks();
   renderTasks();
@@ -370,7 +308,8 @@ function restartTask(taskId) {
   if (!task || task.status !== 'Completed') return;
   task.status = 'Running';
   task.lastStart = Date.now();
-  task.history = task.history || []; // Ensure history array exists
+  task.lastModified = Date.now();
+  task.history = task.history || []; 
   task.history.push({ action: 'Restart', timestamp: new Date().toISOString() });
   saveTasks();
   renderTasks();
@@ -385,55 +324,38 @@ function deleteTask(id) {
 function editTask(id) {
   const task = tasks.find(t => t.id === id);
   if (!task) return;
-
   editingTaskId = id;
-
   document.getElementById('title').value = task.title || '';
   document.getElementById('description').value = task.description || '';
-  // FIX: Ensure task.tags is a string when setting value to input
   document.getElementById('tags').value = Array.isArray(task.tags) ? task.tags.join(',') : (task.tags || '');
   document.getElementById('startDate').value = task.startDate || '';
   document.getElementById('dueDate').value = task.dueDate || '';
 }
 
-// Custom Alert Box (alert() ki jagah)
 function showCustomAlert(message) {
   const alertBox = document.createElement('div');
   alertBox.style.cssText = `
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    background-color: #fff;
-    padding: 20px;
-    border-radius: 8px;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
-    z-index: 1000;
-    text-align: center;
-    font-family: 'Segoe UI', sans-serif;
-    color: #333;
-    border: 1px solid #ddd;
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background-color: #fff; padding: 20px; border-radius: 8px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2); z-index: 1000;
+    text-align: center; font-family: 'Segoe UI', sans-serif; color: #333; border: 1px solid #ddd;
   `;
   alertBox.innerHTML = `
     <p>${message}</p>
     <button style="margin-top: 15px; padding: 8px 15px; background-color: #0078d4; color: white; border: none; border-radius: 5px; cursor: pointer;">OK</button>
   `;
   document.body.appendChild(alertBox);
-
-  alertBox.querySelector('button').onclick = () => {
-    document.body.removeChild(alertBox);
-  };
+  alertBox.querySelector('button').onclick = () => document.body.removeChild(alertBox);
 }
 
 
+// --- Main Application Logic ---
 window.addEventListener('DOMContentLoaded', () => {
   
-  // --- 1. THE PHANTOM TAB LOGIC (START) ---
+  // Phantom Tab Handler
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.get('action') === 'autopause') {
-    // This is the phantom tab opened by Windows!
     document.body.innerHTML = "<h2 style='text-align:center; margin-top:50px;'>Lock Detected. Pausing Task...</h2>";
-    
     loadTasks();
     const runningTask = tasks.find(t => t.status === 'Running');
     if (runningTask) {
@@ -447,27 +369,19 @@ window.addEventListener('DOMContentLoaded', () => {
       runningTask.history.push({ action: 'Pause (System Locked)', timestamp: new Date().toISOString() });
       saveTasks();
     }
-    
-    // Force the phantom tab to close itself instantly
-    setTimeout(() => {
-      window.open('', '_self', ''); 
-      window.close(); 
-    }, 500);
-    
-    return; // Stop the rest of the app from loading in this hidden tab
+    setTimeout(() => { window.open('', '_self', ''); window.close(); }, 500);
+    return; 
   }
 
-  // --- 2. THE MAIN TAB LISTENER ---
-  // Detects when the Phantom Tab updates the local storage
+  // Cross-tab synchronization
   window.addEventListener('storage', (e) => {
     if (e.key === 'tasks') {
-      console.log("Update detected from Phantom Tab. Refreshing...");
       loadTasks();
       renderTasks();
     }
   });
-  // --- THE PHANTOM TAB LOGIC (END) ---
-  // DOM Elements ko yahan initialize karein
+
+  // Init DOM Elements
   taskForm = document.getElementById('taskForm');
   searchInput = document.getElementById('searchInput');
   filterStartDate = document.getElementById('filterStartDate');
@@ -486,47 +400,51 @@ window.addEventListener('DOMContentLoaded', () => {
     Canceled: document.getElementById('canceledList')
   };
 
-  loadTasks(); // Load tasks when DOM is ready
+  loadTasks(); 
   const today = new Date().toISOString().split('T')[0];
   document.getElementById('startDate').value = today;
   document.getElementById('dueDate').value = today;
-  renderTasks(); // Initial render after loading tasks
+  renderTasks(); 
 
-  // Event Listeners ko yahan attach karein
+  // Auto-Pause Setup Hook
+  const enableBtn = document.getElementById('enableAutoPauseBtn');
+  if (enableBtn) {
+    enableBtn.addEventListener('click', setupIdleDetection);
+  }
+
   taskForm.onsubmit = e => {
     e.preventDefault();
-
-    const currentToday = new Date().toISOString().split('T')[0]; // Use a fresh 'today' for each submission
+    const currentToday = new Date().toISOString().split('T')[0];
 
     if (editingTaskId) {
       const task = tasks.find(t => t.id === editingTaskId);
       if (task) {
         task.title = taskForm.title.value;
         task.description = taskForm.description.value;
-        task.tags = taskForm.tags.value; // Tags are taken directly from input value (string)
+        task.tags = taskForm.tags.value; 
         task.startDate = taskForm.startDate.value || currentToday;
         task.dueDate = taskForm.dueDate.value || currentToday;
+        task.lastModified = Date.now();
       }
     } else {
       const newTask = {
         id: generateId(),
         title: taskForm.title.value,
         description: taskForm.description.value,
-        tags: taskForm.tags.value, // Tags are taken directly from input value (string)
+        tags: taskForm.tags.value, 
         startDate: taskForm.startDate.value || currentToday,
         dueDate: taskForm.dueDate.value || currentToday,
         status: 'Upcoming',
         timeTracked: 0,
+        lastModified: Date.now(),
         history: []
       };
       tasks.push(newTask);
-      console.log('New task added:', newTask);
     }
 
     editingTaskId = null;
     saveTasks();
     taskForm.reset();
-    // Default dates set karein
     document.getElementById('startDate').value = currentToday;
     document.getElementById('dueDate').value = currentToday;
     renderTasks();
@@ -551,129 +469,98 @@ window.addEventListener('DOMContentLoaded', () => {
     a.href = url;
     a.download = 'tasks.json';
     a.click();
-    console.log('Export button clicked. Blob created for download.');
-    URL.revokeObjectURL(url); // Clean up the URL object
+    URL.revokeObjectURL(url); 
   };
 
   importBtn.onclick = () => importInput.click();
 
   importInput.onchange = e => {
     const file = e.target.files[0];
-    if (!file) {
-      console.log('No file selected for import.');
-      return;
-    }
+    if (!file) return;
+    
     const reader = new FileReader();
     reader.onload = () => {
-      console.log('File read complete. Raw content:', reader.result);
       try {
         const imported = JSON.parse(reader.result);
-        console.log('Parsed imported data:', imported);
-
-        // Validate imported data structure, but be more adaptive for older formats
         if (Array.isArray(imported) && imported.every(item => typeof item === 'object' && item !== null)) {
-            // Map imported items to the expected task structure
             tasks = imported.map(task => {
-                const newTask = {
-                    id: task.id || generateId(), // Use existing ID or generate new
+                return {
+                    id: task.id || generateId(),
                     title: task.title || 'Untitled Task',
                     description: task.description || '',
-                    // Adapt tags: if array, join; otherwise, use as is (expecting string)
                     tags: Array.isArray(task.tags) ? task.tags.join(',') : (task.tags || ''),
                     startDate: task.startDate || '',
                     dueDate: task.dueDate || '',
                     status: task.status || 'Upcoming',
-                    // Adapt timeTracked: use timeTracked, or timeSpent, or default to 0
                     timeTracked: typeof task.timeTracked === 'number' ? task.timeTracked : (typeof task.timeSpent === 'number' ? task.timeSpent : 0),
                     history: Array.isArray(task.history) ? task.history : [],
-                    completedAt: task.completedAt || undefined // Preserve completedAt if exists
+                    lastModified: task.lastModified || Date.now(),
+                    completedAt: task.completedAt || undefined 
                 };
-                return newTask;
             });
-
             saveTasks();
             renderTasks();
             showCustomAlert('Tasks imported successfully!');
-            console.log('Tasks imported successfully and rendered:', tasks);
         } else {
           showCustomAlert('Invalid file format. Expected an array of task objects.');
-          console.error('Import failed: Imported data is not an array of objects.', imported);
         }
       } catch (err) {
         showCustomAlert('Invalid file content. Please upload a valid JSON file.');
-        console.error('Error parsing imported file:', err);
       }
-    };
-    reader.onerror = (err) => {
-      console.error('FileReader error:', err);
-      showCustomAlert('Error reading file. Please try again.');
     };
     reader.readAsText(file);
   };
 
-  // Section Collapse/Expand functionality with + / - icon
+  // Section Collapse Logic
   document.querySelectorAll('.task-column h3').forEach(header => {
-    const taskList = header.nextElementSibling; // h3 ke baad wala div.task-list
-    const collapseIcon = header.querySelector('.collapse-icon'); // + / - icon
+    const taskList = header.nextElementSibling; 
+    const collapseIcon = header.querySelector('.collapse-icon'); 
 
-    // Initial state set karein (all expanded by default)
     if (taskList && collapseIcon) {
       taskList.style.display = 'flex';
       taskList.style.flexDirection = 'column';
       taskList.classList.remove('collapsed');
-      collapseIcon.textContent = '-'; // Show minus for expanded state
+      collapseIcon.textContent = '-'; 
     }
 
-    header.style.cursor = 'pointer'; // Cursor ko pointer banao
-    header.style.userSelect = 'none'; // Text selection roko
+    header.style.cursor = 'pointer'; 
+    header.style.userSelect = 'none'; 
     header.onclick = () => {
-      if (taskList && collapseIcon) { // Ensure both elements exist
+      if (taskList && collapseIcon) { 
         if (taskList.classList.contains('collapsed')) {
-          // If currently collapsed, expand it
           taskList.style.display = 'flex';
           taskList.style.flexDirection = 'column';
           taskList.classList.remove('collapsed');
-          collapseIcon.textContent = '-'; // Change icon to minus
+          collapseIcon.textContent = '-'; 
         } else {
-          // If currently expanded, collapse it
           taskList.style.display = 'none';
           taskList.classList.add('collapsed');
-          collapseIcon.textContent = '+'; // Change icon to plus
+          collapseIcon.textContent = '+'; 
         }
       }
     };
   });
 });
 
+// --- System Timers & Automation ---
+
+// 1. Core Timer Update (Runs every 1 second)
 setInterval(() => {
   const now = Date.now();
   tasks.forEach(task => {
-    // Sirf Running tasks ke liye timer update karo
     if (task.status === 'Running') {
       const elapsed = now - task.lastStart;
-      const total = (task.timeTracked || 0) + elapsed; // Ensure timeTracked is initialized
-      // Task ID se specific card ko dhoondo
+      const total = (task.timeTracked || 0) + elapsed; 
       const card = document.querySelector(`.task-card[data-task-id="${task.id}"]`);
       if (card) {
         const timerEl = card.querySelector('.timer');
-        if (timerEl) {
-          timerEl.textContent = formatDuration(total);
-        }
+        if (timerEl) timerEl.textContent = formatDuration(total);
       }
     }
   });
 }, 1000);
 
-// --- SYSTEM LOCK & IDLE DETECTION ---
-
-// --- TIMER & BULLETPROOF LOCK DETECTION ---
-
-// --- BULLETPROOF LOCK DETECTION (No Server/Permissions Needed) ---
-
-// --- PROPER SYSTEM LOCK & IDLE DETECTION ---
-
-let lastAutoPausedTask = null;
-
+// Helper function to safely pause the task
 function forceAutoPause(reason) {
   const runningTask = tasks.find(t => t.status === 'Running');
   if (runningTask && runningTask.lastStart) {
@@ -684,31 +571,15 @@ function forceAutoPause(reason) {
     runningTask.history = runningTask.history || [];
     runningTask.history.push({ action: `Pause (${reason})`, timestamp: new Date().toISOString() });
     
-    lastAutoPausedTask = runningTask; 
+    // Store the ID so we can resume it automatically later
+    lastAutoPausedTaskId = runningTask.id; 
+    
     saveTasks();
     renderTasks();
   }
 }
 
-// 1. Normal Timer Update
-setInterval(() => {
-  const now = Date.now();
-  tasks.forEach(task => {
-    if (task.status === 'Running') {
-      const elapsed = now - task.lastStart;
-      const total = (task.timeTracked || 0) + elapsed;
-      const card = document.querySelector(`.task-card[data-task-id="${task.id}"]`);
-      if (card) {
-        const timerEl = card.querySelector('.timer');
-        if (timerEl) timerEl.textContent = formatDuration(total);
-      }
-    }
-  });
-}, 1000);
-
-// 2. The Official Idle API (Detects Win+L and Walking Away)
-// 2. The Official Idle API (Detects Win+L and Walking Away)
-// 2. The Official Idle API (Detects Win+L and Walking Away)
+// 2. The Official Idle API for Netlify Hosted Version
 async function setupIdleDetection() {
   if (!('IdleDetector' in window)) {
     showCustomAlert("Your browser does not support Idle Detection.");
@@ -724,20 +595,17 @@ async function setupIdleDetection() {
   try {
     const idleDetector = new IdleDetector();
     idleDetector.addEventListener('change', () => {
-      // 1. If screen locks or you walk away -> AUTO PAUSE
+      // System Locked or User Walked Away -> AUTO PAUSE
       if (idleDetector.screenState === 'locked' || idleDetector.userState === 'idle') {
         forceAutoPause("System Locked");
       } 
-      // 2. If screen unlocks and you are back -> SILENT AUTO RESUME
+      // System Unlocked and User Active -> SILENT AUTO RESUME
       else if (idleDetector.screenState === 'unlocked' && idleDetector.userState === 'active') {
-        if (lastAutoPausedTask) {
-          // Instantly resume the task without any prompts!
-          resumeTask(lastAutoPausedTask.id);
-          
-          // Silently log it to the background console instead of a visual popup
-          console.log(`Welcome back! Auto-resumed: "${lastAutoPausedTask.title}"`);
-          
-          lastAutoPausedTask = null; // Clear it out
+        if (lastAutoPausedTaskId) {
+          // Instantly resume the task
+          resumeTask(lastAutoPausedTaskId);
+          console.log(`Auto-resumed task ID: ${lastAutoPausedTaskId}`);
+          lastAutoPausedTaskId = null; // Clear it out
         }
       }
     });
@@ -756,12 +624,7 @@ async function setupIdleDetection() {
   }
 }
 
-window.addEventListener('DOMContentLoaded', () => {
-  const enableBtn = document.getElementById('enableAutoPauseBtn');
-  if (enableBtn) enableBtn.addEventListener('click', setupIdleDetection);
-});
-
-// Auto-pause if tab is closed
+// 3. Tab Closure Auto-Pause
 window.addEventListener('beforeunload', () => {
   forceAutoPause("App Closed");
 });
