@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Task Tracker</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="script.js"></script>
+</head>
+<body>
+  <header>
+    <h1>🗂️ Task Tracker</h1>
+    <div class="controls">
+	  <button id="enableAutoPauseBtn" style="background-color: #8e44ad;">🔒 Enable Auto-Pause</button>
+      <input type="text" id="searchInput" placeholder="🔍 Search tasks..." />
+      <input type="date" id="filterStartDate" />
+      <input type="date" id="filterEndDate" />
+      <button id="dashboardBtn">📊 Dashboard</button>
+      <button id="exportBtn">⬇️ Export</button>
+      <input type="file" id="importInput" accept=".json,.csv" hidden />
+      <button id="importBtn">⬆️ Import</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="taskFormSection">
+      <h2>➕ Add New Task</h2>
+      <form id="taskForm">
+        <input type="text" id="title" placeholder="Task Title" required />
+        <textarea id="description" placeholder="Task Description"></textarea>
+        <input type="text" id="tags" placeholder="Tags (comma-separated)" />
+        <input type="date" id="startDate" />
+        <input type="date" id="dueDate" />
+        <button type="submit">Add Task</button>
+      </form>
+    </section>
+
+    <section id="taskSections">
+      <div class="task-column" id="upcomingTasks">
+        <h3 style="color: red;">🔴 <span class="section-title-text">Upcoming</span> <span class="collapse-icon">+</span></h3>
+        <div class="task-list" id="upcomingList"></div>
+      </div>
+      <div class="task-column" id="runningTasks">
+        <h3 style="color: orange;">🟠 <span class="section-title-text">Running</span> <span class="collapse-icon">+</span></h3>
+        <div class="task-list" id="runningList"></div>
+      </div>
+      <div class="task-column" id="pausedTasks">
+        <h3 style="color: goldenrod;">🟡 <span class="section-title-text">Paused</span> <span class="collapse-icon">+</span></h3>
+        <div class="task-list" id="pausedList"></div>
+      </div>
+      <div class="task-column" id="onHoldTasks"> <h3 style="color: purple;">🟣 <span class="section-title-text">On Hold</span> <span class="collapse-icon">+</span></h3>
+        <div class="task-list" id="onHoldList"></div>
+      </div>
+      <div class="task-column" id="completedTasks">
+        <h3 style="color: green;">🟢 <span class="section-title-text">Completed</span> <span class="collapse-icon">+</span></h3>
+        <div class="task-list" id="completedList"></div>
+      </div>
+      <div class="task-column" id="canceledTasks">
+        <h3 style="color: gray;">⚫ <span class="section-title-text">Canceled</span> <span class="collapse-icon">+</span></h3>
+        <div class="task-list" id="canceledList"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>🧠 Offline Task Tracker | Built with HTML, CSS, JS</p>
+    <p>Created : Firozkhan Pathan</p>
+    <p>Email : fpathan@bechtel.com</p>
+  </footer>
+</body>
+</html>
