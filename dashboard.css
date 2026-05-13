@@ -26,7 +26,7 @@ header p {
 
 main {
   padding: 20px;
-  max-width: 1200px;
+  max-width: 1400px; /* Made slightly wider for 24h view */
   margin: auto;
 }
 
@@ -47,10 +47,9 @@ table {
 }
 
 th, td {
-  border: 1px solid #ddd;
-  padding: 6px;
+  border: 1px solid #eee;
   text-align: center;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
 }
 
 th {
@@ -59,64 +58,120 @@ th {
   color: #34495e;
   text-transform: uppercase;
   font-size: 0.8rem;
+  padding: 10px;
+  position: sticky;
+  top: 0;
+  z-index: 20;
 }
 
-/* NEW: Heatmap Cell Styles */
+/* Calendar Cell Styles */
+td.time-label {
+  padding: 4px;
+  color: #7f8c8d;
+  font-weight: 500;
+  width: 60px;
+}
+
 td.heatmap-cell {
-  transition: background-color 0.3s ease;
   position: relative;
-  height: 35px;
+  height: 30px; /* Fixed height is crucial for exact minute mapping */
+  padding: 0; 
+  vertical-align: top;
 }
 
-td.heatmap-cell:hover::after {
-  content: attr(data-tooltip);
+/* Standard Work Hours Background */
+.standard-hour-bg {
+  background-color: rgba(52, 152, 219, 0.04); /* Very faint blue */
+}
+
+/* End of 8.5 Hour Marker Line */
+.standard-end-line {
   position: absolute;
-  bottom: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(44, 62, 80, 0.95);
-  color: #fff;
-  padding: 8px 12px;
-  border-radius: 6px;
-  white-space: pre-wrap;
-  font-size: 0.8rem;
+  left: 0;
+  right: 0;
+  border-bottom: 2px dashed #e74c3c; /* Red dashed line */
   z-index: 10;
   pointer-events: none;
-  min-width: 150px;
-  text-align: left;
-  box-shadow: 0 4px 6px rgba(0,0,0,0.2);
 }
 
-/* Summary List */
-#summaryList {
+/* Exact Task Time Blocks */
+.task-segment {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  background-color: #2ecc71;
+  border-left: 3px solid #27ae60;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: bold;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 4px;
+  box-sizing: border-box;
+  z-index: 5;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+  transition: transform 0.1s ease;
+  text-align: left;
+}
+
+.task-segment:hover {
+  transform: scale(1.02);
+  z-index: 15;
+  cursor: pointer;
+  overflow: visible;
+  white-space: normal;
+  min-height: max-content;
+  background-color: #27ae60;
+}
+
+/* Summary Layout */
+#summarySection {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.summary-card {
   background: #fff;
   padding: 20px;
   border-radius: 8px;
   box-shadow: 0 2px 6px rgba(0,0,0,0.1);
-  margin-top: 20px;
 }
 
-#summaryList h3 {
-  margin-top: 15px;
+.summary-card h3 {
+  margin-top: 0;
   font-size: 1.1rem;
   color: #2c3e50;
   border-bottom: 1px solid #eee;
-  padding-bottom: 4px;
-}
-
-#summaryList ul {
-  padding-left: 0;
-  margin: 10px 0;
-  list-style: none;
-}
-
-#summaryList li {
+  padding-bottom: 8px;
   margin-bottom: 15px;
+}
+
+.summary-card ul {
+  padding-left: 0;
+  list-style: none;
+  margin: 0;
+}
+
+.summary-card li {
+  margin-bottom: 12px;
   font-size: 0.95rem;
   color: #555;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
-/* NEW: Progress Bar Styles */
+.overtime-badge {
+  background-color: #e74c3c;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: bold;
+}
+
 .progress-container {
   width: 100%;
   background-color: #e0e0e0;
@@ -130,7 +185,6 @@ td.heatmap-cell:hover::after {
   height: 100%;
   border-radius: 4px;
   background: linear-gradient(90deg, #3498db, #2ecc71);
-  transition: width 0.5s ease-out;
 }
 
 footer {
@@ -140,6 +194,5 @@ footer {
   background: #f4f6f8;
   color: #555;
   border-radius: 8px;
-  box-shadow: 0 -2px 6px rgba(0,0,0,0.05);
   font-size: 0.85rem;
 }
