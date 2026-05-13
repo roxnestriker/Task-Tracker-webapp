@@ -83,6 +83,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
       for (let i = 0; i < task.history.length; i++) {
         const entry = task.history[i];
+        
+        // Find every continuous chunk of time (Start/Resume -> Pause/Stop)
         if (entry && entry.action && (entry.action.includes('Start') || entry.action === 'Resume')) {
           const start = new Date(entry.timestamp);
           const end = task.history[i + 1] && task.history[i + 1].timestamp 
@@ -104,43 +106,57 @@ document.addEventListener('DOMContentLoaded', () => {
             dailyTotals[dIndex] += duration;
             totalWeeklyTime += duration;
 
-            // Render Exact Task Segments onto Grid
-            let current = new Date(start);
-            while (current < end && current < weekEnd) {
-              const day = current.getDay();
-              const hour = current.getHours();
-              const minute = current.getMinutes();
-              
-              const slotStr = `${hour.toString().padStart(2, '0')}:${minute < 30 ? '00' : '30'}`;
-              const cell = document.getElementById(`cell-${day}-${slotStr.replace(':', '')}`);
+            // --- THE MAGIC FIX: Draw as ONE solid block per continuous run ---
+            let currentStart = new Date(start);
+            if (currentStart < weekStart) currentStart = new Date(weekStart);
+            let finalEnd = new Date(end);
+            if (finalEnd > weekEnd) finalEnd = new Date(weekEnd);
 
-              const slotStart = new Date(current);
-              slotStart.setMinutes(minute < 30 ? 0 : 30, 0, 0);
-              
-              const nextSlot = new Date(slotStart);
-              nextSlot.setMinutes(slotStart.getMinutes() + 30);
+            // This loop only triggers more than once if a task runs across midnight
+            while (currentStart < finalEnd) {
+              const nextMidnight = new Date(currentStart);
+              nextMidnight.setHours(24, 0, 0, 0); 
 
-              const chunkEnd = end < nextSlot ? end : nextSlot;
-              const msInSlot = chunkEnd - current;
-              
-              if (cell && msInSlot > 0) {
-                const startOffsetPct = ((current - slotStart) / MAX_MS_PER_SLOT) * 100;
-                const heightPct = (msInSlot / MAX_MS_PER_SLOT) * 100;
+              const chunkEnd = finalEnd < nextMidnight ? finalEnd : nextMidnight;
+              const durationMs = chunkEnd - currentStart;
 
-                const segment = document.createElement('div');
-                segment.className = 'task-segment';
-                segment.style.top = `${startOffsetPct}%`;
-                segment.style.height = `${heightPct}%`;
-                segment.textContent = task.title;
-                segment.title = `${task.title}\n⏱️ ${formatMinutesToHHMM(msInSlot)}`;
+              if (durationMs > 0) {
+                const day = currentStart.getDay();
+                const hour = currentStart.getHours();
+                const minute = currentStart.getMinutes();
                 
-                cell.appendChild(segment);
+                // Find the EXACT 30-min cell where this run began
+                const slotStr = `${hour.toString().padStart(2, '0')}${minute < 30 ? '00' : '30'}`;
+                const cell = document.getElementById(`cell-${day}-${slotStr}`);
+
+                if (cell) {
+                  const slotStart = new Date(currentStart);
+                  slotStart.setMinutes(minute < 30 ? 0 : 30, 0, 0);
+                  
+                  const startOffsetPct = ((currentStart - slotStart) / MAX_MS_PER_SLOT) * 100;
+                  
+                  // Height can now safely exceed 100% and stretch over the rows beneath it!
+                  const heightPct = (durationMs / MAX_MS_PER_SLOT) * 100;
+
+                  const segment = document.createElement('div');
+                  segment.className = 'task-segment';
+                  segment.style.top = `${startOffsetPct}%`;
+                  segment.style.height = `${heightPct}%`;
+                  
+                  // Ensure it floats perfectly over the table borders
+                  segment.style.zIndex = "50"; 
+                  
+                  segment.textContent = task.title;
+                  segment.title = `${task.title}\n⏱️ ${formatMinutesToHHMM(durationMs)}`;
+                  
+                  cell.appendChild(segment);
+                }
               }
-              current = chunkEnd;
+              currentStart = chunkEnd;
             }
           }
 
-          // Monthly summary
+          // Monthly summary tracking
           const now = new Date(weekStart);
           if (start.getFullYear() === now.getFullYear() && start.getMonth() === now.getMonth()) {
             monthlyTotals[task.title] = (monthlyTotals[task.title] || 0) + duration;
