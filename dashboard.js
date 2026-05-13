@@ -4,19 +4,20 @@ document.addEventListener('DOMContentLoaded', () => {
   const weekSelector = document.getElementById('week-selector');
   let tasks = [];
   
-  // Safely load tasks
   try {
     tasks = JSON.parse(localStorage.getItem('tasks')) || [];
   } catch (e) {
-    console.error("Error loading tasks for dashboard:", e);
     tasks = [];
   }
 
   const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  
+  // Create 24 Hour Time Slots (00:00 to 23:30)
   const timeSlots = [];
-  for (let h = 8; h <= 19; h++) {
+  for (let h = 0; h <= 23; h++) {
     timeSlots.push(`${h.toString().padStart(2, '0')}:00`);
-    if (h < 19) timeSlots.push(`${h.toString().padStart(2, '0')}:30`);
+    timeSlots.push(`${h.toString().padStart(2, '0')}:30`);
   }
 
   function formatMinutesToHHMM(ms) {
@@ -24,26 +25,24 @@ document.addEventListener('DOMContentLoaded', () => {
     const minutes = Math.floor(ms / 60000);
     const hrs = Math.floor(minutes / 60);
     const mins = minutes % 60;
-    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
+    return `${hrs}h ${mins.toString().padStart(2, '0')}m`;
   }
 
   function getWeekStartFromInput(value) {
-    if (!value || !value.includes('-W')) {
-      const today = new Date();
-      return today; // Fallback to today if input is broken
-    }
+    if (!value || !value.includes('-W')) return new Date();
     const [year, week] = value.split('-W');
     const jan4 = new Date(year, 0, 4);
     const dayOfWeek = jan4.getDay() || 7;
     const weekStart = new Date(jan4);
     weekStart.setDate(jan4.getDate() - dayOfWeek + 1 + (parseInt(week) - 1) * 7);
+    weekStart.setHours(0, 0, 0, 0); // Ensure week starts exactly at midnight
     return weekStart;
   }
 
   function renderDashboard(weekStart) {
     const weekEnd = new Date(weekStart.getTime() + 7 * 86400000);
 
-    // Set date headers
+    // 1. Set date headers
     days.forEach((day, i) => {
       const date = new Date(weekStart);
       date.setDate(weekStart.getDate() + i);
@@ -51,40 +50,34 @@ document.addEventListener('DOMContentLoaded', () => {
       if (el) el.textContent = date.toLocaleDateString();
     });
 
-    // Initialize Grid Data [day][slot]
-    const gridData = {};
-    for (let d = 0; d < 7; d++) {
-      gridData[d] = {};
-      timeSlots.forEach(slot => {
-        // Added minStart and maxEnd to track exact minute offsets (0.0 to 1.0)
-        gridData[d][slot] = { timeMs: 0, tasks: new Set(), minStart: 1.0, maxEnd: 0.0 };
-      });
-    }
-
+    // 2. Build the Base 24-Hour Grid
     heatmapBody.innerHTML = '';
-    
-    // Create base table rows
     timeSlots.forEach(slot => {
       const row = document.createElement('tr');
       const timeCell = document.createElement('td');
+      timeCell.className = 'time-label';
       timeCell.textContent = slot;
       row.appendChild(timeCell);
-      for (let i = 0; i < 7; i++) {
+      
+      for (let d = 0; d < 7; d++) {
         const cell = document.createElement('td');
         cell.className = 'heatmap-cell';
-        cell.id = `cell-${i}-${slot.replace(':', '')}`;
+        cell.id = `cell-${d}-${slot.replace(':', '')}`;
         row.appendChild(cell);
       }
       heatmapBody.appendChild(row);
     });
 
+    // Tracking Variables
     const summaryTotals = {};
     const monthlyTotals = {};
+    const dailyTotals = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 }; 
+    const firstTaskMsOfDay = {}; // Tracks the exact start of the first task each day
+
     let totalWeeklyTime = 0;
-    let totalMonthlyTime = 0;
     const MAX_MS_PER_SLOT = 30 * 60 * 1000;
 
-    // Process Tasks
+    // 3. Process Tasks and Map to Grid
     tasks.forEach(task => {
       if (!task || !Array.isArray(task.history)) return; 
 
@@ -97,152 +90,146 @@ document.addEventListener('DOMContentLoaded', () => {
                       : new Date();
           const duration = end - start;
 
-          if (isNaN(duration) || duration < 0) continue; 
+          if (isNaN(duration) || duration <= 0) continue; 
 
-          // Weekly summary tracking
+          // Capture the very first task start time of the day for the 8.5 hr boundary
+          const dIndex = start.getDay();
+          if (!firstTaskMsOfDay[dIndex] || start.getTime() < firstTaskMsOfDay[dIndex]) {
+              firstTaskMsOfDay[dIndex] = start.getTime();
+          }
+
+          // Summaries
           if (start >= weekStart && start < weekEnd) {
             summaryTotals[task.title] = (summaryTotals[task.title] || 0) + duration;
+            dailyTotals[dIndex] += duration;
             totalWeeklyTime += duration;
 
-            // Fill Heatmap Grid chunks
+            // Render Exact Task Segments onto Grid
             let current = new Date(start);
             while (current < end && current < weekEnd) {
               const day = current.getDay();
               const hour = current.getHours();
               const minute = current.getMinutes();
-              if (hour >= 8 && hour <= 19) {
-                const slot = `${hour.toString().padStart(2, '0')}:${minute < 30 ? '00' : '30'}`;
+              
+              const slotStr = `${hour.toString().padStart(2, '0')}:${minute < 30 ? '00' : '30'}`;
+              const cell = document.getElementById(`cell-${day}-${slotStr.replace(':', '')}`);
+
+              const slotStart = new Date(current);
+              slotStart.setMinutes(minute < 30 ? 0 : 30, 0, 0);
+              
+              const nextSlot = new Date(slotStart);
+              nextSlot.setMinutes(slotStart.getMinutes() + 30);
+
+              const chunkEnd = end < nextSlot ? end : nextSlot;
+              const msInSlot = chunkEnd - current;
+              
+              if (cell && msInSlot > 0) {
+                const startOffsetPct = ((current - slotStart) / MAX_MS_PER_SLOT) * 100;
+                const heightPct = (msInSlot / MAX_MS_PER_SLOT) * 100;
+
+                const segment = document.createElement('div');
+                segment.className = 'task-segment';
+                segment.style.top = `${startOffsetPct}%`;
+                segment.style.height = `${heightPct}%`;
+                segment.textContent = task.title;
+                segment.title = `${task.title}\n⏱️ ${formatMinutesToHHMM(msInSlot)}`;
                 
-                const chunkEnd = new Date(current);
-                chunkEnd.setMinutes(minute < 30 ? 30 : 60, 0, 0);
-                const actualEnd = chunkEnd < end ? chunkEnd : end;
-                const msInSlot = actualEnd - current;
-
-                // NEW: Calculate exact fraction of the 30-min slot used
-                const slotStart = new Date(current);
-                slotStart.setMinutes(minute < 30 ? 0 : 30, 0, 0);
-                const startFraction = (current - slotStart) / MAX_MS_PER_SLOT;
-                const endFraction = (actualEnd - slotStart) / MAX_MS_PER_SLOT;
-
-                if (gridData[day] && gridData[day][slot]) {
-                    gridData[day][slot].timeMs += msInSlot;
-                    gridData[day][slot].tasks.add(task.title);
-                    // Update boundaries for the gradient
-                    gridData[day][slot].minStart = Math.min(gridData[day][slot].minStart, startFraction);
-                    gridData[day][slot].maxEnd = Math.max(gridData[day][slot].maxEnd, endFraction);
-                }
+                cell.appendChild(segment);
               }
-              current.setMinutes(minute < 30 ? 30 : 60, 0, 0);
+              current = chunkEnd;
             }
           }
 
-          // Monthly summary tracking
+          // Monthly summary
           const now = new Date(weekStart);
           if (start.getFullYear() === now.getFullYear() && start.getMonth() === now.getMonth()) {
             monthlyTotals[task.title] = (monthlyTotals[task.title] || 0) + duration;
-            totalMonthlyTime += duration;
           }
         }
       }
     });
 
-    // --- Apply exact percentage fills, merge contiguous tasks, and add text ---
-    const BORDER_COLOR = '#27ae60'; // Darker green for boundary box
-    const TEXT_COLOR = '#145a32';   // Deep forest green for readability
-    
+    // 4. Draw Standard Work Hours (8.5 Hours from first task)
     for (let d = 0; d < 7; d++) {
-      let previousTask = null;
-      let previousCell = null;
+      if (firstTaskMsOfDay[d]) {
+        const standardStartMs = firstTaskMsOfDay[d];
+        const standardEndMs = standardStartMs + (8.5 * 60 * 60 * 1000); // +8.5 Hours
 
-      timeSlots.forEach(slot => {
-        const data = gridData[d][slot];
-        const currentTask = data.timeMs > 0 ? Array.from(data.tasks)[0] : null;
-        const cell = document.getElementById(`cell-${d}-${slot.replace(':', '')}`);
+        timeSlots.forEach(slot => {
+          const cell = document.getElementById(`cell-${d}-${slot.replace(':', '')}`);
+          if (!cell) return;
 
-        if (!cell) return;
+          const [h, m] = slot.split(':').map(Number);
+          const cellStartMs = new Date(weekStart).setHours(24 * d + h, m, 0, 0);
+          const cellEndMs = cellStartMs + MAX_MS_PER_SLOT;
 
-        if (currentTask) {
-          // 1. Calculate color and exact fill percentages
-          const intensity = Math.min(0.2 + (data.timeMs / MAX_MS_PER_SLOT) * 0.8, 1);
-          const fillColor = `rgba(46, 204, 113, ${intensity})`; 
-          
-          let startPct = data.minStart * 100;
-          let endPct = data.maxEnd * 100;
-          
-          // Safety snapping
-          if (startPct < 1) startPct = 0;
-          if (endPct > 99) endPct = 100;
-
-          // Apply the exact gradient fill!
-          cell.style.background = `linear-gradient(to bottom, transparent ${startPct}%, ${fillColor} ${startPct}%, ${fillColor} ${endPct}%, transparent ${endPct}%)`;
-          
-          const taskList = Array.from(data.tasks).join('\n• ');
-          cell.setAttribute('data-tooltip', `⏱️ ${formatMinutesToHHMM(data.timeMs)}\n• ${taskList}`);
-
-          // 2. Border Logic
-          cell.style.borderLeft = `2px solid ${BORDER_COLOR}`;
-          cell.style.borderRight = `2px solid ${BORDER_COLOR}`;
-
-          if (currentTask === previousTask) {
-            cell.style.borderTop = 'none';
-            if (previousCell) previousCell.style.borderBottom = 'none';
-            cell.innerHTML = ''; 
-          } else {
-            cell.style.borderTop = `2px solid ${BORDER_COLOR}`;
-            
-            // Add Text
-            cell.innerHTML = ''; 
-            const labelDiv = document.createElement('div');
-            labelDiv.style.cssText = `font-size: 0.85rem; font-weight: bold; color: ${TEXT_COLOR}; padding: 2px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%; box-sizing: border-box; text-align: center;`;
-            
-            // Push text down slightly if the task starts late in the 30-min block
-            if (startPct > 0) {
-                labelDiv.style.marginTop = `${(startPct / 100) * 35}px`; 
-            }
-            
-            labelDiv.textContent = currentTask;
-            cell.appendChild(labelDiv);
-
-            if (previousTask && previousCell) {
-              previousCell.style.borderBottom = `2px solid ${BORDER_COLOR}`;
-            }
+          // Light blue background for standard hours
+          if (cellEndMs > standardStartMs && cellStartMs < standardEndMs) {
+            cell.classList.add('standard-hour-bg');
           }
-        } else {
-          // Empty cell
-          cell.style.background = '';
-          cell.style.border = '';
-          cell.removeAttribute('data-tooltip');
-          cell.innerHTML = '';
 
-          if (previousTask && previousCell) {
-            previousCell.style.borderBottom = `2px solid ${BORDER_COLOR}`;
+          // Draw the red dashed line EXACTLY at the 8.5 hour mark
+          if (standardEndMs >= cellStartMs && standardEndMs < cellEndMs) {
+            const offsetPct = ((standardEndMs - cellStartMs) / MAX_MS_PER_SLOT) * 100;
+            const line = document.createElement('div');
+            line.className = 'standard-end-line';
+            line.style.top = `${offsetPct}%`;
+            cell.appendChild(line);
           }
-        }
-
-        previousTask = currentTask;
-        previousCell = cell;
-      });
-
-      if (previousTask && previousCell) {
-        previousCell.style.borderBottom = `2px solid ${BORDER_COLOR}`;
+        });
       }
     }
 
-    // --- Render Summaries ---
+    // 5. Render Summaries
     summaryList.innerHTML = '';
 
-    const createSummarySection = (title, totalsObj, totalTime) => {
+    // --- DAILY SUMMARY & OVERTIME ---
+    const dailySection = document.createElement('div');
+    dailySection.className = 'summary-card';
+    dailySection.innerHTML = '<h3>📆 Daily Summary & Overtime</h3>';
+    const dailyUl = document.createElement('ul');
+    
+    let hasDailyData = false;
+    for (let d = 0; d < 7; d++) {
+      if (dailyTotals[d] > 0) {
+        hasDailyData = true;
+        const li = document.createElement('li');
+        const totalActiveMs = dailyTotals[d];
+        
+        // Calculate Overtime (Anything over 8 active working hours)
+        const standardMs = 8 * 60 * 60 * 1000;
+        const overtimeMs = totalActiveMs > standardMs ? totalActiveMs - standardMs : 0;
+        
+        const dayDate = new Date(weekStart);
+        dayDate.setDate(dayDate.getDate() + d);
+
+        let html = `<span><strong>${dayNames[d]}</strong> (${dayDate.toLocaleDateString()}): ${formatMinutesToHHMM(totalActiveMs)}</span>`;
+        if (overtimeMs > 0) {
+          html += `<span class="overtime-badge">⚠️ ${formatMinutesToHHMM(overtimeMs)} Overtime</span>`;
+        }
+        li.innerHTML = html;
+        dailyUl.appendChild(li);
+      }
+    }
+    
+    if (!hasDailyData) {
+        dailyUl.innerHTML = '<li style="color:#888; font-style:italic;">No tasks tracked this week.</li>';
+    }
+    dailySection.appendChild(dailyUl);
+    summaryList.appendChild(dailySection);
+
+
+    // --- WEEKLY & MONTHLY SUMMARIES ---
+    const createSummaryCard = (title, totalsObj, totalTime) => {
+      const card = document.createElement('div');
+      card.className = 'summary-card';
       const header = document.createElement('h3');
       header.textContent = title;
-      summaryList.appendChild(header);
+      card.appendChild(header);
 
       if (Object.keys(totalsObj).length === 0) {
-        const noData = document.createElement('p');
-        noData.textContent = "No time tracked for this period.";
-        noData.style.color = "#888";
-        noData.style.fontStyle = "italic";
-        noData.style.marginTop = "5px";
-        summaryList.appendChild(noData);
+        card.innerHTML += '<p style="color:#888; font-style:italic;">No time tracked.</p>';
+        summaryList.appendChild(card);
         return;
       }
 
@@ -251,8 +238,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
       sortedEntries.forEach(([taskTitle, ms]) => {
         const li = document.createElement('li');
-        const percentage = totalTime > 0 ? ((ms / totalTime) * 100).toFixed(1) : 0;
+        li.style.flexDirection = 'column';
+        li.style.alignItems = 'stretch';
         
+        const percentage = totalTime > 0 ? ((ms / totalTime) * 100).toFixed(1) : 0;
         li.innerHTML = `
           <div style="display: flex; justify-content: space-between; font-weight: 500;">
             <span>${taskTitle}</span>
@@ -264,11 +253,15 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
         ul.appendChild(li);
       });
-      summaryList.appendChild(ul);
+      card.appendChild(ul);
+      summaryList.appendChild(card);
     };
 
-    createSummarySection('📅 Weekly Summary', summaryTotals, totalWeeklyTime);
-    createSummarySection('🗓️ Monthly Summary', monthlyTotals, totalMonthlyTime);
+    createSummaryCard(`📅 Weekly Task Breakdown (Total: ${formatMinutesToHHMM(totalWeeklyTime)})`, summaryTotals, totalWeeklyTime);
+    
+    let totalMonth = 0;
+    Object.values(monthlyTotals).forEach(v => totalMonth += v);
+    createSummaryCard('🗓️ Monthly Task Breakdown', monthlyTotals, totalMonth);
   }
 
   function getISOWeek(date) {
