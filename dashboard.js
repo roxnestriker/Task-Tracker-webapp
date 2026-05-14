@@ -29,13 +29,20 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function getWeekStartFromInput(value) {
-    if (!value || !value.includes('-W')) return new Date();
+    if (!value || !value.includes('-W')) {
+      const today = new Date();
+      today.setDate(today.getDate() - today.getDay()); // Force fallback to Sunday
+      today.setHours(0, 0, 0, 0);
+      return today;
+    }
     const [year, week] = value.split('-W');
     const jan4 = new Date(year, 0, 4);
     const dayOfWeek = jan4.getDay() || 7;
     const weekStart = new Date(jan4);
-    weekStart.setDate(jan4.getDate() - dayOfWeek + 1 + (parseInt(week) - 1) * 7);
-    weekStart.setHours(0, 0, 0, 0); // Ensure week starts exactly at midnight
+    
+    // FIX: Removed the "+ 1" to shift the ISO Monday back to Sunday!
+    weekStart.setDate(jan4.getDate() - dayOfWeek + (parseInt(week) - 1) * 7);
+    weekStart.setHours(0, 0, 0, 0); 
     return weekStart;
   }
 
@@ -72,7 +79,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const summaryTotals = {};
     const monthlyTotals = {};
     const dailyTotals = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 }; 
-    const firstTaskMsOfDay = {}; // Tracks the exact start of the first task each day
+    const firstTaskMsOfDay = {}; 
 
     let totalWeeklyTime = 0;
     const MAX_MS_PER_SLOT = 30 * 60 * 1000;
@@ -84,7 +91,6 @@ document.addEventListener('DOMContentLoaded', () => {
       for (let i = 0; i < task.history.length; i++) {
         const entry = task.history[i];
         
-        // Find every continuous chunk of time (Start/Resume -> Pause/Stop)
         if (entry && entry.action && (entry.action.includes('Start') || entry.action === 'Resume')) {
           const start = new Date(entry.timestamp);
           const end = task.history[i + 1] && task.history[i + 1].timestamp 
@@ -94,7 +100,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
           if (isNaN(duration) || duration <= 0) continue; 
 
-          // Capture the very first task start time of the day for the 8.5 hr boundary
           const dIndex = start.getDay();
           if (!firstTaskMsOfDay[dIndex] || start.getTime() < firstTaskMsOfDay[dIndex]) {
               firstTaskMsOfDay[dIndex] = start.getTime();
@@ -106,13 +111,11 @@ document.addEventListener('DOMContentLoaded', () => {
             dailyTotals[dIndex] += duration;
             totalWeeklyTime += duration;
 
-            // --- THE MAGIC FIX: Draw as ONE solid block per continuous run ---
             let currentStart = new Date(start);
             if (currentStart < weekStart) currentStart = new Date(weekStart);
             let finalEnd = new Date(end);
             if (finalEnd > weekEnd) finalEnd = new Date(weekEnd);
 
-            // This loop only triggers more than once if a task runs across midnight
             while (currentStart < finalEnd) {
               const nextMidnight = new Date(currentStart);
               nextMidnight.setHours(24, 0, 0, 0); 
@@ -125,7 +128,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 const hour = currentStart.getHours();
                 const minute = currentStart.getMinutes();
                 
-                // Find the EXACT 30-min cell where this run began
                 const slotStr = `${hour.toString().padStart(2, '0')}${minute < 30 ? '00' : '30'}`;
                 const cell = document.getElementById(`cell-${day}-${slotStr}`);
 
@@ -134,18 +136,13 @@ document.addEventListener('DOMContentLoaded', () => {
                   slotStart.setMinutes(minute < 30 ? 0 : 30, 0, 0);
                   
                   const startOffsetPct = ((currentStart - slotStart) / MAX_MS_PER_SLOT) * 100;
-                  
-                  // Height can now safely exceed 100% and stretch over the rows beneath it!
                   const heightPct = (durationMs / MAX_MS_PER_SLOT) * 100;
 
                   const segment = document.createElement('div');
                   segment.className = 'task-segment';
                   segment.style.top = `${startOffsetPct}%`;
                   segment.style.height = `${heightPct}%`;
-                  
-                  // Ensure it floats perfectly over the table borders
                   segment.style.zIndex = "50"; 
-                  
                   segment.textContent = task.title;
                   segment.title = `${task.title}\n⏱️ ${formatMinutesToHHMM(durationMs)}`;
                   
@@ -179,12 +176,10 @@ document.addEventListener('DOMContentLoaded', () => {
           const cellStartMs = new Date(weekStart).setHours(24 * d + h, m, 0, 0);
           const cellEndMs = cellStartMs + MAX_MS_PER_SLOT;
 
-          // Light blue background for standard hours
           if (cellEndMs > standardStartMs && cellStartMs < standardEndMs) {
             cell.classList.add('standard-hour-bg');
           }
 
-          // Draw the red dashed line EXACTLY at the 8.5 hour mark
           if (standardEndMs >= cellStartMs && standardEndMs < cellEndMs) {
             const offsetPct = ((standardEndMs - cellStartMs) / MAX_MS_PER_SLOT) * 100;
             const line = document.createElement('div');
@@ -199,7 +194,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // 5. Render Summaries
     summaryList.innerHTML = '';
 
-    // --- DAILY SUMMARY & OVERTIME ---
     const dailySection = document.createElement('div');
     dailySection.className = 'summary-card';
     dailySection.innerHTML = '<h3>📆 Daily Summary & Overtime</h3>';
@@ -212,7 +206,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const li = document.createElement('li');
         const totalActiveMs = dailyTotals[d];
         
-        // Calculate Overtime (Anything over 8 active working hours)
         const standardMs = 8 * 60 * 60 * 1000;
         const overtimeMs = totalActiveMs > standardMs ? totalActiveMs - standardMs : 0;
         
@@ -234,8 +227,6 @@ document.addEventListener('DOMContentLoaded', () => {
     dailySection.appendChild(dailyUl);
     summaryList.appendChild(dailySection);
 
-
-    // --- WEEKLY & MONTHLY SUMMARIES ---
     const createSummaryCard = (title, totalsObj, totalTime) => {
       const card = document.createElement('div');
       card.className = 'summary-card';
