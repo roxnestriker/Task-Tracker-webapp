@@ -21,17 +21,27 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function formatMinutesToHHMM(ms) {
-    if (!ms || isNaN(ms)) return "00:00";
+    if (!ms || isNaN(ms)) return "00h 00m";
     const minutes = Math.floor(ms / 60000);
     const hrs = Math.floor(minutes / 60);
     const mins = minutes % 60;
     return `${hrs}h ${mins.toString().padStart(2, '0')}m`;
   }
 
+  function formatClockTime(date) {
+    let hours = date.getHours();
+    let minutes = date.getMinutes();
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12; 
+    minutes = minutes < 10 ? '0' + minutes : minutes;
+    return `${hours}:${minutes} ${ampm}`;
+  }
+
   function getWeekStartFromInput(value) {
     if (!value || !value.includes('-W')) {
       const today = new Date();
-      today.setDate(today.getDate() - today.getDay()); // Force fallback to Sunday
+      today.setDate(today.getDate() - today.getDay()); 
       today.setHours(0, 0, 0, 0);
       return today;
     }
@@ -40,7 +50,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const dayOfWeek = jan4.getDay() || 7;
     const weekStart = new Date(jan4);
     
-    // FIX: Removed the "+ 1" to shift the ISO Monday back to Sunday!
     weekStart.setDate(jan4.getDate() - dayOfWeek + (parseInt(week) - 1) * 7);
     weekStart.setHours(0, 0, 0, 0); 
     return weekStart;
@@ -75,16 +84,45 @@ document.addEventListener('DOMContentLoaded', () => {
       heatmapBody.appendChild(row);
     });
 
-    // Tracking Variables
+    // 3. Global Clock Tracker: Find Absolute Login (First Task Start) for EVERY day
+    const dailyShiftData = {};
+    tasks.forEach(task => {
+      if (!task.history) return;
+      for (let i = 0; i < task.history.length; i++) {
+        const entry = task.history[i];
+        if (entry && entry.action && (entry.action.includes('Start') || entry.action === 'Resume')) {
+          const d = new Date(entry.timestamp);
+          if (isNaN(d.getTime())) continue;
+          
+          const dateKey = `${d.getFullYear()}-${(d.getMonth()+1).toString().padStart(2,'0')}-${d.getDate().toString().padStart(2,'0')}`;
+          const timeMs = d.getTime();
+
+          if (!dailyShiftData[dateKey]) {
+            dailyShiftData[dateKey] = {
+                loginMs: timeMs,
+                regularEndMs: timeMs + (8.5 * 60 * 60 * 1000) // Exactly 8.5 hours later
+            };
+          } else {
+            if (timeMs < dailyShiftData[dateKey].loginMs) {
+                dailyShiftData[dateKey].loginMs = timeMs;
+                dailyShiftData[dateKey].regularEndMs = timeMs + (8.5 * 60 * 60 * 1000);
+            }
+          }
+        }
+      }
+    });
+
+    // Tracking Variables for active task time & OT
     const summaryTotals = {};
     const monthlyTotals = {};
-    const dailyTotals = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 }; 
-    const firstTaskMsOfDay = {}; 
-
-    let totalWeeklyTime = 0;
+    const dailyActiveMs = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 }; 
+    const dailyOTMs = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 }; 
+    let totalWeeklyActiveTime = 0;
+    let totalWeeklyOvertimeMs = 0;
+    let totalMonthlyOvertimeMs = 0;
     const MAX_MS_PER_SLOT = 30 * 60 * 1000;
 
-    // 3. Process Tasks and Map to Grid
+    // 4. Process Tasks and Map to Grid
     tasks.forEach(task => {
       if (!task || !Array.isArray(task.history)) return; 
 
@@ -100,17 +138,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
           if (isNaN(duration) || duration <= 0) continue; 
 
-          const dIndex = start.getDay();
-          if (!firstTaskMsOfDay[dIndex] || start.getTime() < firstTaskMsOfDay[dIndex]) {
-              firstTaskMsOfDay[dIndex] = start.getTime();
-          }
+          const dateKey = `${start.getFullYear()}-${(start.getMonth()+1).toString().padStart(2,'0')}-${start.getDate().toString().padStart(2,'0')}`;
+          const shiftEndMs = dailyShiftData[dateKey].regularEndMs;
 
-          // Summaries
+          // Summaries & Grid for Current Week
           if (start >= weekStart && start < weekEnd) {
             summaryTotals[task.title] = (summaryTotals[task.title] || 0) + duration;
-            dailyTotals[dIndex] += duration;
-            totalWeeklyTime += duration;
+            dailyActiveMs[start.getDay()] += duration;
+            totalWeeklyActiveTime += duration;
 
+            // --- OT CALCULATION ---
+            // If the task was worked on AFTER the 8.5 hour window closed, it's Overtime.
+            let otForThisChunk = 0;
+            if (start.getTime() >= shiftEndMs) {
+                otForThisChunk = duration; // Entire task is OT
+            } else if (end.getTime() > shiftEndMs) {
+                otForThisChunk = end.getTime() - shiftEndMs; // Task crossed the border, only count time after border
+            }
+            dailyOTMs[start.getDay()] += otForThisChunk;
+            totalWeeklyOvertimeMs += otForThisChunk;
+
+            // --- DRAW ON GRID ---
             let currentStart = new Date(start);
             if (currentStart < weekStart) currentStart = new Date(weekStart);
             let finalEnd = new Date(end);
@@ -144,7 +192,7 @@ document.addEventListener('DOMContentLoaded', () => {
                   segment.style.height = `${heightPct}%`;
                   segment.style.zIndex = "50"; 
                   segment.textContent = task.title;
-                  segment.title = `${task.title}\n⏱️ ${formatMinutesToHHMM(durationMs)}`;
+                  segment.title = `${task.title}\n⏱️ Active: ${formatMinutesToHHMM(durationMs)}`;
                   
                   cell.appendChild(segment);
                 }
@@ -157,16 +205,29 @@ document.addEventListener('DOMContentLoaded', () => {
           const now = new Date(weekStart);
           if (start.getFullYear() === now.getFullYear() && start.getMonth() === now.getMonth()) {
             monthlyTotals[task.title] = (monthlyTotals[task.title] || 0) + duration;
+            
+            // Calculate Monthly OT accurately using the same logic
+            let otForThisChunk = 0;
+            if (start.getTime() >= shiftEndMs) {
+                otForThisChunk = duration;
+            } else if (end.getTime() > shiftEndMs) {
+                otForThisChunk = end.getTime() - shiftEndMs; 
+            }
+            totalMonthlyOvertimeMs += otForThisChunk;
           }
         }
       }
     });
 
-    // 4. Draw Standard Work Hours (8.5 Hours from first task)
+    // 5. Draw Standard Work Hours (8.5 Hours from Absolute Login Time)
     for (let d = 0; d < 7; d++) {
-      if (firstTaskMsOfDay[d]) {
-        const standardStartMs = firstTaskMsOfDay[d];
-        const standardEndMs = standardStartMs + (8.5 * 60 * 60 * 1000); // +8.5 Hours
+      const currentDay = new Date(weekStart);
+      currentDay.setDate(currentDay.getDate() + d);
+      const dateKey = `${currentDay.getFullYear()}-${(currentDay.getMonth()+1).toString().padStart(2,'0')}-${currentDay.getDate().toString().padStart(2,'0')}`;
+      
+      if (dailyShiftData[dateKey]) {
+        const standardStartMs = dailyShiftData[dateKey].loginMs;
+        const standardEndMs = dailyShiftData[dateKey].regularEndMs;
 
         timeSlots.forEach(slot => {
           const cell = document.getElementById(`cell-${d}-${slot.replace(':', '')}`);
@@ -191,31 +252,46 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    // 5. Render Summaries
+    // 6. Render Summaries
     summaryList.innerHTML = '';
 
+    // --- DAILY SUMMARY & OVERTIME (TASK-BASED AFTER 8.5H) ---
     const dailySection = document.createElement('div');
     dailySection.className = 'summary-card';
-    dailySection.innerHTML = '<h3>📆 Daily Summary & Overtime</h3>';
+    dailySection.innerHTML = '<h3>📆 Daily Shift & Overtime</h3>';
     const dailyUl = document.createElement('ul');
     
     let hasDailyData = false;
-    for (let d = 0; d < 7; d++) {
-      if (dailyTotals[d] > 0) {
-        hasDailyData = true;
-        const li = document.createElement('li');
-        const totalActiveMs = dailyTotals[d];
-        
-        const standardMs = 8 * 60 * 60 * 1000;
-        const overtimeMs = totalActiveMs > standardMs ? totalActiveMs - standardMs : 0;
-        
-        const dayDate = new Date(weekStart);
-        dayDate.setDate(dayDate.getDate() + d);
 
-        let html = `<span><strong>${dayNames[d]}</strong> (${dayDate.toLocaleDateString()}): ${formatMinutesToHHMM(totalActiveMs)}</span>`;
-        if (overtimeMs > 0) {
-          html += `<span class="overtime-badge">⚠️ ${formatMinutesToHHMM(overtimeMs)} Overtime</span>`;
-        }
+    for (let d = 0; d < 7; d++) {
+      const currentDay = new Date(weekStart);
+      currentDay.setDate(currentDay.getDate() + d);
+      const dateKey = `${currentDay.getFullYear()}-${(currentDay.getMonth()+1).toString().padStart(2,'0')}-${currentDay.getDate().toString().padStart(2,'0')}`;
+      
+      if (dailyShiftData[dateKey] && dailyActiveMs[d] > 0) {
+        hasDailyData = true;
+        const loginMs = dailyShiftData[dateKey].loginMs;
+        const regularEndMs = dailyShiftData[dateKey].regularEndMs;
+        const activeMs = dailyActiveMs[d] || 0;
+        const overtimeMs = dailyOTMs[d] || 0;
+
+        const li = document.createElement('li');
+        li.style.flexDirection = "column";
+        li.style.alignItems = "flex-start";
+        li.style.gap = "4px";
+        li.style.borderBottom = "1px solid #eee";
+        li.style.paddingBottom = "8px";
+
+        let html = `
+          <div style="width: 100%; display: flex; justify-content: space-between;">
+            <strong>${dayNames[d]} (${currentDay.toLocaleDateString()})</strong>
+            ${overtimeMs > 0 ? `<span class="overtime-badge">⚠️ ${formatMinutesToHHMM(overtimeMs)} Active OT</span>` : `<span style="color: #27ae60; font-size: 0.8rem; font-weight: bold;">Standard Shift</span>`}
+          </div>
+          <div style="font-size: 0.85rem; color: #555; width: 100%; display: flex; justify-content: space-between;">
+            <span>🕘 First Activity: <strong>${formatClockTime(new Date(loginMs))}</strong> &nbsp;&rarr;&nbsp; 🕔 Reg. Hours End: <strong>${formatClockTime(new Date(regularEndMs))}</strong></span>
+            <span>Total Tracked Task Time: ${formatMinutesToHHMM(activeMs)}</span>
+          </div>
+        `;
         li.innerHTML = html;
         dailyUl.appendChild(li);
       }
@@ -227,15 +303,17 @@ document.addEventListener('DOMContentLoaded', () => {
     dailySection.appendChild(dailyUl);
     summaryList.appendChild(dailySection);
 
-    const createSummaryCard = (title, totalsObj, totalTime) => {
+    // --- WEEKLY & MONTHLY SUMMARIES ---
+    const createSummaryCard = (title, totalsObj, totalActiveTime, overtimeMs) => {
       const card = document.createElement('div');
       card.className = 'summary-card';
+      
       const header = document.createElement('h3');
-      header.textContent = title;
+      header.innerHTML = `${title} <br><span style="font-size:0.85rem; color:#e74c3c;">Total Tracked Overtime: ${formatMinutesToHHMM(overtimeMs)}</span>`;
       card.appendChild(header);
 
       if (Object.keys(totalsObj).length === 0) {
-        card.innerHTML += '<p style="color:#888; font-style:italic;">No time tracked.</p>';
+        card.innerHTML += '<p style="color:#888; font-style:italic;">No active tasks tracked.</p>';
         summaryList.appendChild(card);
         return;
       }
@@ -248,7 +326,7 @@ document.addEventListener('DOMContentLoaded', () => {
         li.style.flexDirection = 'column';
         li.style.alignItems = 'stretch';
         
-        const percentage = totalTime > 0 ? ((ms / totalTime) * 100).toFixed(1) : 0;
+        const percentage = totalActiveTime > 0 ? ((ms / totalActiveTime) * 100).toFixed(1) : 0;
         li.innerHTML = `
           <div style="display: flex; justify-content: space-between; font-weight: 500;">
             <span>${taskTitle}</span>
@@ -264,11 +342,11 @@ document.addEventListener('DOMContentLoaded', () => {
       summaryList.appendChild(card);
     };
 
-    createSummaryCard(`📅 Weekly Task Breakdown (Total: ${formatMinutesToHHMM(totalWeeklyTime)})`, summaryTotals, totalWeeklyTime);
+    createSummaryCard(`📅 Weekly Task Breakdown (Active Time: ${formatMinutesToHHMM(totalWeeklyActiveTime)})`, summaryTotals, totalWeeklyActiveTime, totalWeeklyOvertimeMs);
     
-    let totalMonth = 0;
-    Object.values(monthlyTotals).forEach(v => totalMonth += v);
-    createSummaryCard('🗓️ Monthly Task Breakdown', monthlyTotals, totalMonth);
+    let totalMonthActive = 0;
+    Object.values(monthlyTotals).forEach(v => totalMonthActive += v);
+    createSummaryCard(`🗓️ Monthly Task Breakdown`, monthlyTotals, totalMonthActive, totalMonthlyOvertimeMs);
   }
 
   function getISOWeek(date) {
