@@ -595,12 +595,12 @@ async function setupIdleDetection() {
   try {
     const idleDetector = new IdleDetector();
     idleDetector.addEventListener('change', () => {
-      // System Locked or User Walked Away -> AUTO PAUSE
-      if (idleDetector.screenState === 'locked' || idleDetector.userState === 'idle') {
+      // ONLY PAUSE IF THE SCREEN IS PHYSICALLY LOCKED (Ignore mouse/keyboard idle)
+      if (idleDetector.screenState === 'locked') {
         forceAutoPause("System Locked");
       } 
-      // System Unlocked and User Active -> SILENT AUTO RESUME
-      else if (idleDetector.screenState === 'unlocked' && idleDetector.userState === 'active') {
+      // SILENT AUTO RESUME WHEN UNLOCKED
+      else if (idleDetector.screenState === 'unlocked') {
         if (lastAutoPausedTaskId) {
           // Instantly resume the task
           resumeTask(lastAutoPausedTaskId);
@@ -610,7 +610,7 @@ async function setupIdleDetection() {
       }
     });
 
-    // Start detector (60 seconds threshold for inactivity)
+    // We still have to pass a threshold to start the API, but it will ignore user idle now
     await idleDetector.start({ threshold: 60000 });
     
     const btn = document.getElementById('enableAutoPauseBtn');
