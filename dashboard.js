@@ -187,20 +187,18 @@ document.addEventListener('DOMContentLoaded', () => {
                   
                   // --- CLICK TO EDIT ---
                   segment.onclick = (e) => {
-                      if(e.target.classList.contains('resize-handle')) return; // Ignore drag clicks
+                      if(e.target.classList.contains('resize-handle')) return; 
                       window.openEditModal(task.id, i, currentStart);
                   };
 
-                  // --- ADD DRAG HANDLES ---
+                  // --- DRAG HANDLES ---
                   const topHandle = document.createElement('div');
                   topHandle.className = 'resize-handle top';
                   topHandle.onmousedown = (e) => startDragResize(e, task.id, i, 'top');
 
                   const bottomHandle = document.createElement('div');
                   bottomHandle.className = 'resize-handle bottom';
-                  bottomHandle.title = "Drag to resize End Time";
                   
-                  // Only allow ending time drag if task is actually paused/stopped (not running)
                   if (task.history[i + 1] && task.history[i + 1].timestamp) {
                       bottomHandle.onmousedown = (e) => startDragResize(e, task.id, i, 'bottom');
                       segment.appendChild(bottomHandle);
@@ -364,7 +362,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function onDragResize(e) {
     if (!dragState) return;
-    // We don't visually resize during move to save CPU, we wait for mouseup to snap it!
   }
 
   function stopDragResize(e) {
@@ -374,8 +371,6 @@ document.addEventListener('DOMContentLoaded', () => {
     document.removeEventListener('mouseup', stopDragResize);
 
     const deltaY = e.clientY - dragState.startY;
-    
-    // Grid Math: 30 pixels = 30 minutes. Therefore, 1 pixel = 1 minute (60,000 ms).
     const timeShiftMs = deltaY * 60 * 1000; 
 
     const startEntry = dragState.taskRef.history[dragState.index];
@@ -383,19 +378,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (dragState.edge === 'top') {
         const newStartMs = dragState.originalStartMs + timeShiftMs;
-        // Don't allow start time to be pushed past the end time
         if (!dragState.originalEndMs || newStartMs < dragState.originalEndMs) {
             startEntry.timestamp = new Date(newStartMs).toISOString();
         }
     } else if (dragState.edge === 'bottom' && endEntry) {
         const newEndMs = dragState.originalEndMs + timeShiftMs;
-        // Don't allow end time to be pushed before the start time
         if (newEndMs > dragState.originalStartMs) {
             endEntry.timestamp = new Date(newEndMs).toISOString();
         }
     }
 
-    // Recalculate Total Time for the entire task to keep main app accurate
     let newTotalMs = 0;
     for (let i = 0; i < dragState.taskRef.history.length; i++) {
       const entry = dragState.taskRef.history[i];
@@ -410,14 +402,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     localStorage.setItem('tasks', JSON.stringify(tasks));
     
-    // Instantly redraw the board!
     const weekStart = getWeekStartFromInput(weekSelector.value);
     renderDashboard(weekStart); 
     
     dragState = null;
   }
 
-  // --- MANUAL EDIT MODAL (Fallback) ---
+  // --- MANUAL EDIT MODAL ---
   const modal = document.getElementById('editTimeModal');
   const startTimeInput = document.getElementById('editStartTime');
   const endTimeInput = document.getElementById('editEndTime');
@@ -499,14 +490,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const today = new Date();
   const week = getISOWeek(today);
+  
+  // THE FIX: Listen for both 'change' and 'input' events so it updates instantly!
   if (weekSelector) {
     weekSelector.value = `${today.getFullYear()}-W${week.toString().padStart(2, '0')}`;
     const weekStart = getWeekStartFromInput(weekSelector.value);
     renderDashboard(weekStart);
 
+    // Instantly update when you click the arrows
+    weekSelector.addEventListener('input', () => {
+      const newWeekStart = getWeekStartFromInput(weekSelector.value);
+      renderDashboard(newWeekStart);
+    });
+    
+    // Fallback for typing and hitting enter
     weekSelector.addEventListener('change', () => {
-      const weekStart = getWeekStartFromInput(weekSelector.value);
-      renderDashboard(weekStart);
+      const newWeekStart = getWeekStartFromInput(weekSelector.value);
+      renderDashboard(newWeekStart);
     });
   }
 });
