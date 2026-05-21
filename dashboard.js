@@ -139,7 +139,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (isNaN(duration) || duration <= 0) continue; 
 
           const dateKey = `${start.getFullYear()}-${(start.getMonth()+1).toString().padStart(2,'0')}-${start.getDate().toString().padStart(2,'0')}`;
-          const shiftEndMs = dailyShiftData[dateKey].regularEndMs;
+          const shiftEndMs = dailyShiftData[dateKey] ? dailyShiftData[dateKey].regularEndMs : 0;
 
           // Summaries & Grid for Current Week
           if (start >= weekStart && start < weekEnd) {
@@ -148,12 +148,13 @@ document.addEventListener('DOMContentLoaded', () => {
             totalWeeklyActiveTime += duration;
 
             // --- OT CALCULATION ---
-            // If the task was worked on AFTER the 8.5 hour window closed, it's Overtime.
             let otForThisChunk = 0;
-            if (start.getTime() >= shiftEndMs) {
-                otForThisChunk = duration; // Entire task is OT
-            } else if (end.getTime() > shiftEndMs) {
-                otForThisChunk = end.getTime() - shiftEndMs; // Task crossed the border, only count time after border
+            if (shiftEndMs > 0) {
+              if (start.getTime() >= shiftEndMs) {
+                  otForThisChunk = duration; 
+              } else if (end.getTime() > shiftEndMs) {
+                  otForThisChunk = end.getTime() - shiftEndMs; 
+              }
             }
             dailyOTMs[start.getDay()] += otForThisChunk;
             totalWeeklyOvertimeMs += otForThisChunk;
@@ -193,12 +194,11 @@ document.addEventListener('DOMContentLoaded', () => {
                   segment.style.zIndex = "50"; 
                   segment.textContent = task.title;
                   segment.title = `${task.title}\n⏱️ Active: ${formatMinutesToHHMM(durationMs)}`;
-                  // --- NEW: Add click events for editing ---
-                  segment.dataset.taskId = task.id;
-                  segment.dataset.historyIndex = i;
-                  segment.onclick = () => openEditModal(task.id, i, currentStart);
-                  // ---------------------------------------
                   
+                  // --- CLICK TO EDIT EVENT ---
+                  segment.style.cursor = 'pointer';
+                  segment.onclick = () => window.openEditModal(task.id, i, currentStart);
+
                   cell.appendChild(segment);
                 }
               }
@@ -211,12 +211,13 @@ document.addEventListener('DOMContentLoaded', () => {
           if (start.getFullYear() === now.getFullYear() && start.getMonth() === now.getMonth()) {
             monthlyTotals[task.title] = (monthlyTotals[task.title] || 0) + duration;
             
-            // Calculate Monthly OT accurately using the same logic
             let otForThisChunk = 0;
-            if (start.getTime() >= shiftEndMs) {
-                otForThisChunk = duration;
-            } else if (end.getTime() > shiftEndMs) {
-                otForThisChunk = end.getTime() - shiftEndMs; 
+            if (shiftEndMs > 0) {
+              if (start.getTime() >= shiftEndMs) {
+                  otForThisChunk = duration;
+              } else if (end.getTime() > shiftEndMs) {
+                  otForThisChunk = end.getTime() - shiftEndMs; 
+              }
             }
             totalMonthlyOvertimeMs += otForThisChunk;
           }
@@ -260,7 +261,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 6. Render Summaries
     summaryList.innerHTML = '';
 
-    // --- DAILY SUMMARY & OVERTIME (TASK-BASED AFTER 8.5H) ---
+    // --- DAILY SUMMARY & OVERTIME ---
     const dailySection = document.createElement('div');
     dailySection.className = 'summary-card';
     dailySection.innerHTML = '<h3>📆 Daily Shift & Overtime</h3>';
@@ -375,23 +376,21 @@ document.addEventListener('DOMContentLoaded', () => {
       renderDashboard(weekStart);
     });
   }
-});
-// --- MANUAL TIME EDITING LOGIC ---
+
+  // --- MANUAL TIME EDITING LOGIC ---
   let editingTaskRef = null;
   let editingHistoryIndex = null;
-  let editingBaseDate = null; // To remember which day the block belongs to
+  let editingBaseDate = null; 
 
   const modal = document.getElementById('editTimeModal');
   const startTimeInput = document.getElementById('editStartTime');
   const endTimeInput = document.getElementById('editEndTime');
   const warningText = document.getElementById('editTimeWarning');
 
-  // Helper to format Date to HH:MM (24hr) for the HTML input
   function toInputTime(date) {
     return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
   }
 
-  // Helper to apply a new HH:MM string to an existing Date object
   function applyTimeToDate(baseDate, timeString) {
     const [hours, minutes] = timeString.split(':').map(Number);
     const newDate = new Date(baseDate.getTime());
@@ -399,25 +398,26 @@ document.addEventListener('DOMContentLoaded', () => {
     return newDate;
   }
 
-  // Opens the popup
   window.openEditModal = function(taskId, historyIndex, blockDate) {
+    if (!modal) {
+        alert("Oops! The Edit Modal HTML is missing from dashboard.html");
+        return;
+    }
     const task = tasks.find(t => t.id === taskId);
     if (!task) return;
 
     editingTaskRef = task;
     editingHistoryIndex = historyIndex;
-    editingBaseDate = new Date(blockDate); // Keep track of the day
+    editingBaseDate = new Date(blockDate);
 
     const startEntry = task.history[historyIndex];
     const endEntry = task.history[historyIndex + 1];
 
     document.getElementById('editModalTitle').textContent = `Edit: ${task.title}`;
     
-    // Set Start Time
     const startDate = new Date(startEntry.timestamp);
     startTimeInput.value = toInputTime(startDate);
 
-    // Set End Time (or disable if still running)
     if (endEntry && endEntry.timestamp) {
       const endDate = new Date(endEntry.timestamp);
       endTimeInput.value = toInputTime(endDate);
@@ -432,50 +432,45 @@ document.addEventListener('DOMContentLoaded', () => {
     modal.style.display = 'flex';
   };
 
-  // Close popup
-  document.getElementById('cancelEditBtn').onclick = () => {
-    modal.style.display = 'none';
-  };
+  if (modal) {
+      document.getElementById('cancelEditBtn').onclick = () => {
+        modal.style.display = 'none';
+      };
 
-  // Save changes
-  document.getElementById('saveEditBtn').onclick = () => {
-    if (!editingTaskRef || editingHistoryIndex === null) return;
+      document.getElementById('saveEditBtn').onclick = () => {
+        if (!editingTaskRef || editingHistoryIndex === null) return;
 
-    const startEntry = editingTaskRef.history[editingHistoryIndex];
-    const endEntry = editingTaskRef.history[editingHistoryIndex + 1];
+        const startEntry = editingTaskRef.history[editingHistoryIndex];
+        const endEntry = editingTaskRef.history[editingHistoryIndex + 1];
 
-    // Update Start Time
-    if (startTimeInput.value) {
-      const newStart = applyTimeToDate(editingBaseDate, startTimeInput.value);
-      startEntry.timestamp = newStart.toISOString();
-    }
+        if (startTimeInput.value) {
+          const newStart = applyTimeToDate(editingBaseDate, startTimeInput.value);
+          startEntry.timestamp = newStart.toISOString();
+        }
 
-    // Update End Time
-    if (endTimeInput.value && !endTimeInput.disabled && endEntry) {
-      const newEnd = applyTimeToDate(editingBaseDate, endTimeInput.value);
-      endEntry.timestamp = newEnd.toISOString();
-    }
+        if (endTimeInput.value && !endTimeInput.disabled && endEntry) {
+          const newEnd = applyTimeToDate(editingBaseDate, endTimeInput.value);
+          endEntry.timestamp = newEnd.toISOString();
+        }
 
-    // Recalculate the entire 'timeTracked' total for this task to ensure dashboard and main app match
-    let newTotalMs = 0;
-    for (let i = 0; i < editingTaskRef.history.length; i++) {
-      const entry = editingTaskRef.history[i];
-      if (entry.action.includes('Start') || entry.action === 'Resume') {
-        const s = new Date(entry.timestamp);
-        const e = editingTaskRef.history[i+1] ? new Date(editingTaskRef.history[i+1].timestamp) : new Date();
-        newTotalMs += (e - s);
-      }
-    }
-    
-    // Update task data
-    editingTaskRef.timeTracked = newTotalMs;
-    editingTaskRef.lastModified = Date.now();
+        let newTotalMs = 0;
+        for (let i = 0; i < editingTaskRef.history.length; i++) {
+          const entry = editingTaskRef.history[i];
+          if (entry.action.includes('Start') || entry.action === 'Resume') {
+            const s = new Date(entry.timestamp);
+            const e = editingTaskRef.history[i+1] ? new Date(editingTaskRef.history[i+1].timestamp) : new Date();
+            newTotalMs += (e - s);
+          }
+        }
+        
+        editingTaskRef.timeTracked = newTotalMs;
+        editingTaskRef.lastModified = Date.now();
 
-    // Save to local storage and refresh dashboard
-    localStorage.setItem('tasks', JSON.stringify(tasks));
-    modal.style.display = 'none';
-    
-    // Re-render dashboard to show changes instantly
-    const weekStart = getWeekStartFromInput(weekSelector.value);
-    renderDashboard(weekStart); 
-  };
+        localStorage.setItem('tasks', JSON.stringify(tasks));
+        modal.style.display = 'none';
+        
+        const weekStart = getWeekStartFromInput(weekSelector.value);
+        renderDashboard(weekStart); 
+      };
+  }
+});
