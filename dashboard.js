@@ -193,6 +193,11 @@ document.addEventListener('DOMContentLoaded', () => {
                   segment.style.zIndex = "50"; 
                   segment.textContent = task.title;
                   segment.title = `${task.title}\n⏱️ Active: ${formatMinutesToHHMM(durationMs)}`;
+                  // --- NEW: Add click events for editing ---
+                  segment.dataset.taskId = task.id;
+                  segment.dataset.historyIndex = i;
+                  segment.onclick = () => openEditModal(task.id, i, currentStart);
+                  // ---------------------------------------
                   
                   cell.appendChild(segment);
                 }
@@ -371,3 +376,106 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 });
+// --- MANUAL TIME EDITING LOGIC ---
+  let editingTaskRef = null;
+  let editingHistoryIndex = null;
+  let editingBaseDate = null; // To remember which day the block belongs to
+
+  const modal = document.getElementById('editTimeModal');
+  const startTimeInput = document.getElementById('editStartTime');
+  const endTimeInput = document.getElementById('editEndTime');
+  const warningText = document.getElementById('editTimeWarning');
+
+  // Helper to format Date to HH:MM (24hr) for the HTML input
+  function toInputTime(date) {
+    return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+  }
+
+  // Helper to apply a new HH:MM string to an existing Date object
+  function applyTimeToDate(baseDate, timeString) {
+    const [hours, minutes] = timeString.split(':').map(Number);
+    const newDate = new Date(baseDate.getTime());
+    newDate.setHours(hours, minutes, 0, 0);
+    return newDate;
+  }
+
+  // Opens the popup
+  window.openEditModal = function(taskId, historyIndex, blockDate) {
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return;
+
+    editingTaskRef = task;
+    editingHistoryIndex = historyIndex;
+    editingBaseDate = new Date(blockDate); // Keep track of the day
+
+    const startEntry = task.history[historyIndex];
+    const endEntry = task.history[historyIndex + 1];
+
+    document.getElementById('editModalTitle').textContent = `Edit: ${task.title}`;
+    
+    // Set Start Time
+    const startDate = new Date(startEntry.timestamp);
+    startTimeInput.value = toInputTime(startDate);
+
+    // Set End Time (or disable if still running)
+    if (endEntry && endEntry.timestamp) {
+      const endDate = new Date(endEntry.timestamp);
+      endTimeInput.value = toInputTime(endDate);
+      endTimeInput.disabled = false;
+      warningText.style.display = 'none';
+    } else {
+      endTimeInput.value = "";
+      endTimeInput.disabled = true;
+      warningText.style.display = 'block';
+    }
+
+    modal.style.display = 'flex';
+  };
+
+  // Close popup
+  document.getElementById('cancelEditBtn').onclick = () => {
+    modal.style.display = 'none';
+  };
+
+  // Save changes
+  document.getElementById('saveEditBtn').onclick = () => {
+    if (!editingTaskRef || editingHistoryIndex === null) return;
+
+    const startEntry = editingTaskRef.history[editingHistoryIndex];
+    const endEntry = editingTaskRef.history[editingHistoryIndex + 1];
+
+    // Update Start Time
+    if (startTimeInput.value) {
+      const newStart = applyTimeToDate(editingBaseDate, startTimeInput.value);
+      startEntry.timestamp = newStart.toISOString();
+    }
+
+    // Update End Time
+    if (endTimeInput.value && !endTimeInput.disabled && endEntry) {
+      const newEnd = applyTimeToDate(editingBaseDate, endTimeInput.value);
+      endEntry.timestamp = newEnd.toISOString();
+    }
+
+    // Recalculate the entire 'timeTracked' total for this task to ensure dashboard and main app match
+    let newTotalMs = 0;
+    for (let i = 0; i < editingTaskRef.history.length; i++) {
+      const entry = editingTaskRef.history[i];
+      if (entry.action.includes('Start') || entry.action === 'Resume') {
+        const s = new Date(entry.timestamp);
+        const e = editingTaskRef.history[i+1] ? new Date(editingTaskRef.history[i+1].timestamp) : new Date();
+        newTotalMs += (e - s);
+      }
+    }
+    
+    // Update task data
+    editingTaskRef.timeTracked = newTotalMs;
+    editingTaskRef.lastModified = Date.now();
+
+    // Save to local storage and refresh dashboard
+    localStorage.setItem('tasks', JSON.stringify(tasks));
+    modal.style.display = 'none';
+    
+    // Re-render dashboard to show changes instantly
+    const weekStart = getWeekStartFromInput(weekSelector.value);
+    renderDashboard(weekStart); 
+  };
