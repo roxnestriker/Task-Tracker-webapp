@@ -56,6 +56,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderDashboard(weekStart) {
     const weekEnd = new Date(weekStart.getTime() + 7 * 86400000);
+    
+    // --- THE FIX: Define 'now' so the script doesn't crash! ---
+    const now = new Date(weekStart); 
 
     days.forEach((day, i) => {
       const date = new Date(weekStart);
@@ -491,19 +494,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const today = new Date();
   const week = getISOWeek(today);
   
-  // THE FIX: Listen for both 'change' and 'input' events so it updates instantly!
   if (weekSelector) {
     weekSelector.value = `${today.getFullYear()}-W${week.toString().padStart(2, '0')}`;
     const weekStart = getWeekStartFromInput(weekSelector.value);
     renderDashboard(weekStart);
 
-    // Instantly update when you click the arrows
     weekSelector.addEventListener('input', () => {
       const newWeekStart = getWeekStartFromInput(weekSelector.value);
       renderDashboard(newWeekStart);
     });
     
-    // Fallback for typing and hitting enter
     weekSelector.addEventListener('change', () => {
       const newWeekStart = getWeekStartFromInput(weekSelector.value);
       renderDashboard(newWeekStart);
