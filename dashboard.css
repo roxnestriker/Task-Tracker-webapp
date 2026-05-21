@@ -218,3 +218,30 @@ footer {
 .modal-actions { display: flex; justify-content: space-between; margin-top: 20px; }
 .btn-save { background: #27ae60; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-weight: bold; }
 .btn-cancel { background: #95a5a6; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; }
+
+/* --- DRAG & DROP RESIZE HANDLES --- */
+.resize-handle {
+  position: absolute;
+  left: 0; right: 0;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.4);
+  cursor: ns-resize;
+  z-index: 100;
+  transition: background 0.2s;
+}
+.resize-handle:hover {
+  background: rgba(255, 255, 255, 0.9);
+}
+.resize-handle.top { 
+  top: 0; 
+  border-bottom: 1px solid rgba(0,0,0,0.2); 
+}
+.resize-handle.bottom { 
+  bottom: 0; 
+  border-top: 1px solid rgba(0,0,0,0.2); 
+}
+/* Prevent text highlighting while dragging */
+body.is-dragging {
+  user-select: none;
+  cursor: ns-resize !important;
+}
