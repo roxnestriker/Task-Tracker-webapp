@@ -12,8 +12,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
   const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const MAX_MS_PER_SLOT = 30 * 60 * 1000;
   
-  // Create 24 Hour Time Slots (00:00 to 23:30)
   const timeSlots = [];
   for (let h = 0; h <= 23; h++) {
     timeSlots.push(`${h.toString().padStart(2, '0')}:00`);
@@ -49,7 +49,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const jan4 = new Date(year, 0, 4);
     const dayOfWeek = jan4.getDay() || 7;
     const weekStart = new Date(jan4);
-    
     weekStart.setDate(jan4.getDate() - dayOfWeek + (parseInt(week) - 1) * 7);
     weekStart.setHours(0, 0, 0, 0); 
     return weekStart;
@@ -58,7 +57,6 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderDashboard(weekStart) {
     const weekEnd = new Date(weekStart.getTime() + 7 * 86400000);
 
-    // 1. Set date headers
     days.forEach((day, i) => {
       const date = new Date(weekStart);
       date.setDate(weekStart.getDate() + i);
@@ -66,7 +64,6 @@ document.addEventListener('DOMContentLoaded', () => {
       if (el) el.textContent = date.toLocaleDateString();
     });
 
-    // 2. Build the Base 24-Hour Grid
     heatmapBody.innerHTML = '';
     timeSlots.forEach(slot => {
       const row = document.createElement('tr');
@@ -84,7 +81,6 @@ document.addEventListener('DOMContentLoaded', () => {
       heatmapBody.appendChild(row);
     });
 
-    // 3. Global Clock Tracker: Find Absolute Login (First Task Start) for EVERY day
     const dailyShiftData = {};
     tasks.forEach(task => {
       if (!task.history) return;
@@ -100,7 +96,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (!dailyShiftData[dateKey]) {
             dailyShiftData[dateKey] = {
                 loginMs: timeMs,
-                regularEndMs: timeMs + (8.5 * 60 * 60 * 1000) // Exactly 8.5 hours later
+                regularEndMs: timeMs + (8.5 * 60 * 60 * 1000)
             };
           } else {
             if (timeMs < dailyShiftData[dateKey].loginMs) {
@@ -112,7 +108,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
 
-    // Tracking Variables for active task time & OT
     const summaryTotals = {};
     const monthlyTotals = {};
     const dailyActiveMs = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 }; 
@@ -120,9 +115,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let totalWeeklyActiveTime = 0;
     let totalWeeklyOvertimeMs = 0;
     let totalMonthlyOvertimeMs = 0;
-    const MAX_MS_PER_SLOT = 30 * 60 * 1000;
 
-    // 4. Process Tasks and Map to Grid
     tasks.forEach(task => {
       if (!task || !Array.isArray(task.history)) return; 
 
@@ -141,13 +134,11 @@ document.addEventListener('DOMContentLoaded', () => {
           const dateKey = `${start.getFullYear()}-${(start.getMonth()+1).toString().padStart(2,'0')}-${start.getDate().toString().padStart(2,'0')}`;
           const shiftEndMs = dailyShiftData[dateKey] ? dailyShiftData[dateKey].regularEndMs : 0;
 
-          // Summaries & Grid for Current Week
           if (start >= weekStart && start < weekEnd) {
             summaryTotals[task.title] = (summaryTotals[task.title] || 0) + duration;
             dailyActiveMs[start.getDay()] += duration;
             totalWeeklyActiveTime += duration;
 
-            // --- OT CALCULATION ---
             let otForThisChunk = 0;
             if (shiftEndMs > 0) {
               if (start.getTime() >= shiftEndMs) {
@@ -159,7 +150,6 @@ document.addEventListener('DOMContentLoaded', () => {
             dailyOTMs[start.getDay()] += otForThisChunk;
             totalWeeklyOvertimeMs += otForThisChunk;
 
-            // --- DRAW ON GRID ---
             let currentStart = new Date(start);
             if (currentStart < weekStart) currentStart = new Date(weekStart);
             let finalEnd = new Date(end);
@@ -195,10 +185,28 @@ document.addEventListener('DOMContentLoaded', () => {
                   segment.textContent = task.title;
                   segment.title = `${task.title}\n⏱️ Active: ${formatMinutesToHHMM(durationMs)}`;
                   
-                  // --- CLICK TO EDIT EVENT ---
-                  segment.style.cursor = 'pointer';
-                  segment.onclick = () => window.openEditModal(task.id, i, currentStart);
+                  // --- CLICK TO EDIT ---
+                  segment.onclick = (e) => {
+                      if(e.target.classList.contains('resize-handle')) return; // Ignore drag clicks
+                      window.openEditModal(task.id, i, currentStart);
+                  };
 
+                  // --- ADD DRAG HANDLES ---
+                  const topHandle = document.createElement('div');
+                  topHandle.className = 'resize-handle top';
+                  topHandle.onmousedown = (e) => startDragResize(e, task.id, i, 'top');
+
+                  const bottomHandle = document.createElement('div');
+                  bottomHandle.className = 'resize-handle bottom';
+                  bottomHandle.title = "Drag to resize End Time";
+                  
+                  // Only allow ending time drag if task is actually paused/stopped (not running)
+                  if (task.history[i + 1] && task.history[i + 1].timestamp) {
+                      bottomHandle.onmousedown = (e) => startDragResize(e, task.id, i, 'bottom');
+                      segment.appendChild(bottomHandle);
+                  }
+                  
+                  segment.appendChild(topHandle);
                   cell.appendChild(segment);
                 }
               }
@@ -206,18 +214,12 @@ document.addEventListener('DOMContentLoaded', () => {
             }
           }
 
-          // Monthly summary tracking
-          const now = new Date(weekStart);
           if (start.getFullYear() === now.getFullYear() && start.getMonth() === now.getMonth()) {
             monthlyTotals[task.title] = (monthlyTotals[task.title] || 0) + duration;
-            
             let otForThisChunk = 0;
             if (shiftEndMs > 0) {
-              if (start.getTime() >= shiftEndMs) {
-                  otForThisChunk = duration;
-              } else if (end.getTime() > shiftEndMs) {
-                  otForThisChunk = end.getTime() - shiftEndMs; 
-              }
+              if (start.getTime() >= shiftEndMs) otForThisChunk = duration;
+              else if (end.getTime() > shiftEndMs) otForThisChunk = end.getTime() - shiftEndMs; 
             }
             totalMonthlyOvertimeMs += otForThisChunk;
           }
@@ -225,7 +227,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
 
-    // 5. Draw Standard Work Hours (8.5 Hours from Absolute Login Time)
     for (let d = 0; d < 7; d++) {
       const currentDay = new Date(weekStart);
       currentDay.setDate(currentDay.getDate() + d);
@@ -258,15 +259,11 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    // 6. Render Summaries
     summaryList.innerHTML = '';
-
-    // --- DAILY SUMMARY & OVERTIME ---
     const dailySection = document.createElement('div');
     dailySection.className = 'summary-card';
     dailySection.innerHTML = '<h3>📆 Daily Shift & Overtime</h3>';
     const dailyUl = document.createElement('ul');
-    
     let hasDailyData = false;
 
     for (let d = 0; d < 7; d++) {
@@ -288,7 +285,7 @@ document.addEventListener('DOMContentLoaded', () => {
         li.style.borderBottom = "1px solid #eee";
         li.style.paddingBottom = "8px";
 
-        let html = `
+        li.innerHTML = `
           <div style="width: 100%; display: flex; justify-content: space-between;">
             <strong>${dayNames[d]} (${currentDay.toLocaleDateString()})</strong>
             ${overtimeMs > 0 ? `<span class="overtime-badge">⚠️ ${formatMinutesToHHMM(overtimeMs)} Active OT</span>` : `<span style="color: #27ae60; font-size: 0.8rem; font-weight: bold;">Standard Shift</span>`}
@@ -298,25 +295,18 @@ document.addEventListener('DOMContentLoaded', () => {
             <span>Total Tracked Task Time: ${formatMinutesToHHMM(activeMs)}</span>
           </div>
         `;
-        li.innerHTML = html;
         dailyUl.appendChild(li);
       }
     }
     
-    if (!hasDailyData) {
-        dailyUl.innerHTML = '<li style="color:#888; font-style:italic;">No tasks tracked this week.</li>';
-    }
+    if (!hasDailyData) dailyUl.innerHTML = '<li style="color:#888; font-style:italic;">No tasks tracked this week.</li>';
     dailySection.appendChild(dailyUl);
     summaryList.appendChild(dailySection);
 
-    // --- WEEKLY & MONTHLY SUMMARIES ---
     const createSummaryCard = (title, totalsObj, totalActiveTime, overtimeMs) => {
       const card = document.createElement('div');
       card.className = 'summary-card';
-      
-      const header = document.createElement('h3');
-      header.innerHTML = `${title} <br><span style="font-size:0.85rem; color:#e74c3c;">Total Tracked Overtime: ${formatMinutesToHHMM(overtimeMs)}</span>`;
-      card.appendChild(header);
+      card.innerHTML = `<h3>${title} <br><span style="font-size:0.85rem; color:#e74c3c;">Total Tracked Overtime: ${formatMinutesToHHMM(overtimeMs)}</span></h3>`;
 
       if (Object.keys(totalsObj).length === 0) {
         card.innerHTML += '<p style="color:#888; font-style:italic;">No active tasks tracked.</p>';
@@ -325,22 +315,16 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       const ul = document.createElement('ul');
-      const sortedEntries = Object.entries(totalsObj).sort((a, b) => b[1] - a[1]);
-
-      sortedEntries.forEach(([taskTitle, ms]) => {
+      Object.entries(totalsObj).sort((a, b) => b[1] - a[1]).forEach(([taskTitle, ms]) => {
         const li = document.createElement('li');
         li.style.flexDirection = 'column';
         li.style.alignItems = 'stretch';
-        
         const percentage = totalActiveTime > 0 ? ((ms / totalActiveTime) * 100).toFixed(1) : 0;
         li.innerHTML = `
           <div style="display: flex; justify-content: space-between; font-weight: 500;">
-            <span>${taskTitle}</span>
-            <span>${formatMinutesToHHMM(ms)} (${percentage}%)</span>
+            <span>${taskTitle}</span><span>${formatMinutesToHHMM(ms)} (${percentage}%)</span>
           </div>
-          <div class="progress-container">
-            <div class="progress-bar" style="width: ${percentage}%"></div>
-          </div>
+          <div class="progress-container"><div class="progress-bar" style="width: ${percentage}%"></div></div>
         `;
         ul.appendChild(li);
       });
@@ -349,10 +333,159 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     createSummaryCard(`📅 Weekly Task Breakdown (Active Time: ${formatMinutesToHHMM(totalWeeklyActiveTime)})`, summaryTotals, totalWeeklyActiveTime, totalWeeklyOvertimeMs);
-    
     let totalMonthActive = 0;
     Object.values(monthlyTotals).forEach(v => totalMonthActive += v);
     createSummaryCard(`🗓️ Monthly Task Breakdown`, monthlyTotals, totalMonthActive, totalMonthlyOvertimeMs);
+  }
+
+  // --- DRAG TO RESIZE LOGIC ---
+  let dragState = null;
+
+  function startDragResize(e, taskId, historyIndex, edge) {
+    e.preventDefault(); 
+    e.stopPropagation();
+
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return;
+
+    dragState = {
+      taskRef: task,
+      index: historyIndex,
+      edge: edge,
+      startY: e.clientY,
+      originalStartMs: new Date(task.history[historyIndex].timestamp).getTime(),
+      originalEndMs: task.history[historyIndex + 1] ? new Date(task.history[historyIndex + 1].timestamp).getTime() : null
+    };
+
+    document.body.classList.add('is-dragging');
+    document.addEventListener('mousemove', onDragResize);
+    document.addEventListener('mouseup', stopDragResize);
+  }
+
+  function onDragResize(e) {
+    if (!dragState) return;
+    // We don't visually resize during move to save CPU, we wait for mouseup to snap it!
+  }
+
+  function stopDragResize(e) {
+    if (!dragState) return;
+    document.body.classList.remove('is-dragging');
+    document.removeEventListener('mousemove', onDragResize);
+    document.removeEventListener('mouseup', stopDragResize);
+
+    const deltaY = e.clientY - dragState.startY;
+    
+    // Grid Math: 30 pixels = 30 minutes. Therefore, 1 pixel = 1 minute (60,000 ms).
+    const timeShiftMs = deltaY * 60 * 1000; 
+
+    const startEntry = dragState.taskRef.history[dragState.index];
+    const endEntry = dragState.taskRef.history[dragState.index + 1];
+
+    if (dragState.edge === 'top') {
+        const newStartMs = dragState.originalStartMs + timeShiftMs;
+        // Don't allow start time to be pushed past the end time
+        if (!dragState.originalEndMs || newStartMs < dragState.originalEndMs) {
+            startEntry.timestamp = new Date(newStartMs).toISOString();
+        }
+    } else if (dragState.edge === 'bottom' && endEntry) {
+        const newEndMs = dragState.originalEndMs + timeShiftMs;
+        // Don't allow end time to be pushed before the start time
+        if (newEndMs > dragState.originalStartMs) {
+            endEntry.timestamp = new Date(newEndMs).toISOString();
+        }
+    }
+
+    // Recalculate Total Time for the entire task to keep main app accurate
+    let newTotalMs = 0;
+    for (let i = 0; i < dragState.taskRef.history.length; i++) {
+      const entry = dragState.taskRef.history[i];
+      if (entry.action.includes('Start') || entry.action === 'Resume') {
+        const s = new Date(entry.timestamp);
+        const eTime = dragState.taskRef.history[i+1] ? new Date(dragState.taskRef.history[i+1].timestamp) : new Date();
+        newTotalMs += (eTime - s);
+      }
+    }
+    dragState.taskRef.timeTracked = newTotalMs;
+    dragState.taskRef.lastModified = Date.now();
+
+    localStorage.setItem('tasks', JSON.stringify(tasks));
+    
+    // Instantly redraw the board!
+    const weekStart = getWeekStartFromInput(weekSelector.value);
+    renderDashboard(weekStart); 
+    
+    dragState = null;
+  }
+
+  // --- MANUAL EDIT MODAL (Fallback) ---
+  const modal = document.getElementById('editTimeModal');
+  const startTimeInput = document.getElementById('editStartTime');
+  const endTimeInput = document.getElementById('editEndTime');
+  const warningText = document.getElementById('editTimeWarning');
+
+  function toInputTime(date) { return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`; }
+  function applyTimeToDate(baseDate, timeString) {
+    const [hours, minutes] = timeString.split(':').map(Number);
+    const newDate = new Date(baseDate.getTime());
+    newDate.setHours(hours, minutes, 0, 0);
+    return newDate;
+  }
+
+  window.openEditModal = function(taskId, historyIndex, blockDate) {
+    if (!modal) return;
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return;
+
+    window.editingTaskRef = task;
+    window.editingHistoryIndex = historyIndex;
+    window.editingBaseDate = new Date(blockDate);
+
+    const startEntry = task.history[historyIndex];
+    const endEntry = task.history[historyIndex + 1];
+
+    document.getElementById('editModalTitle').textContent = `Edit: ${task.title}`;
+    startTimeInput.value = toInputTime(new Date(startEntry.timestamp));
+
+    if (endEntry && endEntry.timestamp) {
+      endTimeInput.value = toInputTime(new Date(endEntry.timestamp));
+      endTimeInput.disabled = false;
+      warningText.style.display = 'none';
+    } else {
+      endTimeInput.value = "";
+      endTimeInput.disabled = true;
+      warningText.style.display = 'block';
+    }
+    modal.style.display = 'flex';
+  };
+
+  if (modal) {
+      document.getElementById('cancelEditBtn').onclick = () => modal.style.display = 'none';
+      document.getElementById('saveEditBtn').onclick = () => {
+        if (!window.editingTaskRef || window.editingHistoryIndex === null) return;
+
+        const startEntry = window.editingTaskRef.history[window.editingHistoryIndex];
+        const endEntry = window.editingTaskRef.history[window.editingHistoryIndex + 1];
+
+        if (startTimeInput.value) startEntry.timestamp = applyTimeToDate(window.editingBaseDate, startTimeInput.value).toISOString();
+        if (endTimeInput.value && !endTimeInput.disabled && endEntry) endEntry.timestamp = applyTimeToDate(window.editingBaseDate, endTimeInput.value).toISOString();
+
+        let newTotalMs = 0;
+        for (let i = 0; i < window.editingTaskRef.history.length; i++) {
+          const entry = window.editingTaskRef.history[i];
+          if (entry.action.includes('Start') || entry.action === 'Resume') {
+            const s = new Date(entry.timestamp);
+            const eTime = window.editingTaskRef.history[i+1] ? new Date(window.editingTaskRef.history[i+1].timestamp) : new Date();
+            newTotalMs += (eTime - s);
+          }
+        }
+        window.editingTaskRef.timeTracked = newTotalMs;
+        window.editingTaskRef.lastModified = Date.now();
+        localStorage.setItem('tasks', JSON.stringify(tasks));
+        modal.style.display = 'none';
+        
+        const weekStart = getWeekStartFromInput(weekSelector.value);
+        renderDashboard(weekStart); 
+      };
   }
 
   function getISOWeek(date) {
@@ -375,102 +508,5 @@ document.addEventListener('DOMContentLoaded', () => {
       const weekStart = getWeekStartFromInput(weekSelector.value);
       renderDashboard(weekStart);
     });
-  }
-
-  // --- MANUAL TIME EDITING LOGIC ---
-  let editingTaskRef = null;
-  let editingHistoryIndex = null;
-  let editingBaseDate = null; 
-
-  const modal = document.getElementById('editTimeModal');
-  const startTimeInput = document.getElementById('editStartTime');
-  const endTimeInput = document.getElementById('editEndTime');
-  const warningText = document.getElementById('editTimeWarning');
-
-  function toInputTime(date) {
-    return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
-  }
-
-  function applyTimeToDate(baseDate, timeString) {
-    const [hours, minutes] = timeString.split(':').map(Number);
-    const newDate = new Date(baseDate.getTime());
-    newDate.setHours(hours, minutes, 0, 0);
-    return newDate;
-  }
-
-  window.openEditModal = function(taskId, historyIndex, blockDate) {
-    if (!modal) {
-        alert("Oops! The Edit Modal HTML is missing from dashboard.html");
-        return;
-    }
-    const task = tasks.find(t => t.id === taskId);
-    if (!task) return;
-
-    editingTaskRef = task;
-    editingHistoryIndex = historyIndex;
-    editingBaseDate = new Date(blockDate);
-
-    const startEntry = task.history[historyIndex];
-    const endEntry = task.history[historyIndex + 1];
-
-    document.getElementById('editModalTitle').textContent = `Edit: ${task.title}`;
-    
-    const startDate = new Date(startEntry.timestamp);
-    startTimeInput.value = toInputTime(startDate);
-
-    if (endEntry && endEntry.timestamp) {
-      const endDate = new Date(endEntry.timestamp);
-      endTimeInput.value = toInputTime(endDate);
-      endTimeInput.disabled = false;
-      warningText.style.display = 'none';
-    } else {
-      endTimeInput.value = "";
-      endTimeInput.disabled = true;
-      warningText.style.display = 'block';
-    }
-
-    modal.style.display = 'flex';
-  };
-
-  if (modal) {
-      document.getElementById('cancelEditBtn').onclick = () => {
-        modal.style.display = 'none';
-      };
-
-      document.getElementById('saveEditBtn').onclick = () => {
-        if (!editingTaskRef || editingHistoryIndex === null) return;
-
-        const startEntry = editingTaskRef.history[editingHistoryIndex];
-        const endEntry = editingTaskRef.history[editingHistoryIndex + 1];
-
-        if (startTimeInput.value) {
-          const newStart = applyTimeToDate(editingBaseDate, startTimeInput.value);
-          startEntry.timestamp = newStart.toISOString();
-        }
-
-        if (endTimeInput.value && !endTimeInput.disabled && endEntry) {
-          const newEnd = applyTimeToDate(editingBaseDate, endTimeInput.value);
-          endEntry.timestamp = newEnd.toISOString();
-        }
-
-        let newTotalMs = 0;
-        for (let i = 0; i < editingTaskRef.history.length; i++) {
-          const entry = editingTaskRef.history[i];
-          if (entry.action.includes('Start') || entry.action === 'Resume') {
-            const s = new Date(entry.timestamp);
-            const e = editingTaskRef.history[i+1] ? new Date(editingTaskRef.history[i+1].timestamp) : new Date();
-            newTotalMs += (e - s);
-          }
-        }
-        
-        editingTaskRef.timeTracked = newTotalMs;
-        editingTaskRef.lastModified = Date.now();
-
-        localStorage.setItem('tasks', JSON.stringify(tasks));
-        modal.style.display = 'none';
-        
-        const weekStart = getWeekStartFromInput(weekSelector.value);
-        renderDashboard(weekStart); 
-      };
   }
 });
