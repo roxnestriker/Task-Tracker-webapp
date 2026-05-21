@@ -3,14 +3,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const summaryList = document.getElementById('summaryList');
   const weekSelector = document.getElementById('week-selector');
   let tasks = [];
+  let holidays = [];
   
   try {
     tasks = JSON.parse(localStorage.getItem('tasks')) || [];
+    holidays = JSON.parse(localStorage.getItem('holidays')) || [];
   } catch (e) {
     tasks = [];
   }
 
-  // UPDATED: Shifted to Monday -> Sunday
   const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
   const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
   const MAX_MS_PER_SLOT = 30 * 60 * 1000;
@@ -39,11 +40,9 @@ document.addEventListener('DOMContentLoaded', () => {
     return `${hours}:${minutes} ${ampm}`;
   }
 
-  // CORRECTED: Native ISO Standard (Starts on Monday)
   function getWeekStartFromInput(value) {
     if (!value || !value.includes('-W')) {
       const today = new Date();
-      // Calculate current week's Monday
       const day = today.getDay(), diff = today.getDate() - day + (day == 0 ? -6:1);
       return new Date(today.setDate(diff));
     }
@@ -85,6 +84,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     const dailyShiftData = {};
+    
+    // Find absolute Login Times
     tasks.forEach(task => {
       if (!task.history) return;
       for (let i = 0; i < task.history.length; i++) {
@@ -96,15 +97,19 @@ document.addEventListener('DOMContentLoaded', () => {
           const dateKey = `${d.getFullYear()}-${(d.getMonth()+1).toString().padStart(2,'0')}-${d.getDate().toString().padStart(2,'0')}`;
           const timeMs = d.getTime();
 
+          // HOLIDAY & WEEKEND LOGIC
+          // 0 = Sunday, 6 = Saturday
+          let isOvertimeDay = (d.getDay() === 0 || d.getDay() === 6 || holidays.includes(dateKey));
+
           if (!dailyShiftData[dateKey]) {
             dailyShiftData[dateKey] = {
                 loginMs: timeMs,
-                regularEndMs: timeMs + (8.5 * 60 * 60 * 1000)
+                regularEndMs: isOvertimeDay ? timeMs : timeMs + (8.5 * 60 * 60 * 1000)
             };
           } else {
             if (timeMs < dailyShiftData[dateKey].loginMs) {
                 dailyShiftData[dateKey].loginMs = timeMs;
-                dailyShiftData[dateKey].regularEndMs = timeMs + (8.5 * 60 * 60 * 1000);
+                dailyShiftData[dateKey].regularEndMs = isOvertimeDay ? timeMs : timeMs + (8.5 * 60 * 60 * 1000);
             }
           }
         }
@@ -138,8 +143,6 @@ document.addEventListener('DOMContentLoaded', () => {
           const shiftEndMs = dailyShiftData[dateKey] ? dailyShiftData[dateKey].regularEndMs : 0;
 
           if (start >= weekStart && start < weekEnd) {
-            
-            // Map Sunday (0) to 6, Monday (1) to 0, etc. for our new grid
             let sysDay = start.getDay();
             let colIndex = sysDay === 0 ? 6 : sysDay - 1;
 
@@ -149,11 +152,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             let otForThisChunk = 0;
             if (shiftEndMs > 0) {
-              if (start.getTime() >= shiftEndMs) {
-                  otForThisChunk = duration; 
-              } else if (end.getTime() > shiftEndMs) {
-                  otForThisChunk = end.getTime() - shiftEndMs; 
-              }
+              if (start.getTime() >= shiftEndMs) otForThisChunk = duration; 
+              else if (end.getTime() > shiftEndMs) otForThisChunk = end.getTime() - shiftEndMs; 
             }
             dailyOTMs[colIndex] += otForThisChunk;
             totalWeeklyOvertimeMs += otForThisChunk;
@@ -166,17 +166,14 @@ document.addEventListener('DOMContentLoaded', () => {
             while (currentStart < finalEnd) {
               const nextMidnight = new Date(currentStart);
               nextMidnight.setHours(24, 0, 0, 0); 
-
               const chunkEnd = finalEnd < nextMidnight ? finalEnd : nextMidnight;
               const durationMs = chunkEnd - currentStart;
 
               if (durationMs > 0) {
                 let currentSysDay = currentStart.getDay();
                 let currentColIndex = currentSysDay === 0 ? 6 : currentSysDay - 1;
-
                 const hour = currentStart.getHours();
                 const minute = currentStart.getMinutes();
-                
                 const slotStr = `${hour.toString().padStart(2, '0')}${minute < 30 ? '00' : '30'}`;
                 const cell = document.getElementById(`cell-${currentColIndex}-${slotStr}`);
 
@@ -194,21 +191,35 @@ document.addEventListener('DOMContentLoaded', () => {
                   segment.textContent = task.title;
                   segment.title = `${task.title}\n⏱️ Active: ${formatMinutesToHHMM(durationMs)}`;
                   
-                  // --- CLICK TO EDIT (Only works in Edit Mode) ---
+                  // GLASSMORPHISM DYNAMIC OVERTIME COLORS
+                  const isWeekend = currentSysDay === 0 || currentSysDay === 6 || holidays.includes(dateKey);
+                  
+                  if (isWeekend || currentStart.getTime() >= shiftEndMs) {
+                    // 100% OVERTIME (Red Glass)
+                    segment.style.background = 'rgba(239, 68, 68, 0.4)';
+                    segment.style.borderLeftColor = '#ef4444';
+                  } else if (chunkEnd.getTime() <= shiftEndMs) {
+                    // 100% REGULAR (Green Glass - Default)
+                  } else {
+                    // CROSSED THE BOUNDARY (Gradient Glass)
+                    const regMs = shiftEndMs - currentStart.getTime();
+                    const otPct = (regMs / durationMs) * 100;
+                    segment.style.background = `linear-gradient(to bottom, rgba(52, 211, 153, 0.4) ${otPct}%, rgba(239, 68, 68, 0.4) ${otPct}%)`;
+                  }
+
+                  // CLICK TO EDIT (Requires Secret Mode)
                   segment.onclick = (e) => {
                       if(!document.body.classList.contains('edit-mode-active')) return;
                       if(e.target.classList.contains('resize-handle')) return; 
                       window.openEditModal(task.id, i, currentStart);
                   };
 
-                  // --- DRAG HANDLES ---
                   const topHandle = document.createElement('div');
                   topHandle.className = 'resize-handle top';
                   topHandle.onmousedown = (e) => startDragResize(e, task.id, i, 'top');
 
                   const bottomHandle = document.createElement('div');
                   bottomHandle.className = 'resize-handle bottom';
-                  
                   if (task.history[i + 1] && task.history[i + 1].timestamp) {
                       bottomHandle.onmousedown = (e) => startDragResize(e, task.id, i, 'bottom');
                       segment.appendChild(bottomHandle);
@@ -235,12 +246,16 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
 
+    // Draw Background limits
     for (let d = 0; d < 7; d++) {
       const currentDay = new Date(weekStart);
       currentDay.setDate(currentDay.getDate() + d);
       const dateKey = `${currentDay.getFullYear()}-${(currentDay.getMonth()+1).toString().padStart(2,'0')}-${currentDay.getDate().toString().padStart(2,'0')}`;
       
-      if (dailyShiftData[dateKey]) {
+      let sysDay = currentDay.getDay();
+      const isWeekend = (sysDay === 0 || sysDay === 6 || holidays.includes(dateKey));
+
+      if (dailyShiftData[dateKey] && !isWeekend) {
         const standardStartMs = dailyShiftData[dateKey].loginMs;
         const standardEndMs = dailyShiftData[dateKey].regularEndMs;
 
@@ -255,7 +270,6 @@ document.addEventListener('DOMContentLoaded', () => {
           if (cellEndMs > standardStartMs && cellStartMs < standardEndMs) {
             cell.classList.add('standard-hour-bg');
           }
-
           if (standardEndMs >= cellStartMs && standardEndMs < cellEndMs) {
             const offsetPct = ((standardEndMs - cellStartMs) / MAX_MS_PER_SLOT) * 100;
             const line = document.createElement('div');
@@ -279,6 +293,9 @@ document.addEventListener('DOMContentLoaded', () => {
       currentDay.setDate(currentDay.getDate() + d);
       const dateKey = `${currentDay.getFullYear()}-${(currentDay.getMonth()+1).toString().padStart(2,'0')}-${currentDay.getDate().toString().padStart(2,'0')}`;
       
+      let sysDay = currentDay.getDay();
+      const isWeekend = (sysDay === 0 || sysDay === 6 || holidays.includes(dateKey));
+
       if (dailyShiftData[dateKey] && dailyActiveMs[d] > 0) {
         hasDailyData = true;
         const loginMs = dailyShiftData[dateKey].loginMs;
@@ -298,7 +315,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ${overtimeMs > 0 ? `<span class="overtime-badge">⚠️ ${formatMinutesToHHMM(overtimeMs)} Active OT</span>` : `<span style="color: #10b981; font-size: 0.75rem; font-weight: 700;">Standard Shift</span>`}
           </div>
           <div style="font-size: 0.85rem; color: #64748b; width: 100%; display: flex; justify-content: space-between;">
-            <span>🕘 Login: <strong>${formatClockTime(new Date(loginMs))}</strong> &nbsp;&rarr;&nbsp; 🕔 Reg. End: <strong>${formatClockTime(new Date(regularEndMs))}</strong></span>
+            <span>🕘 Login: <strong>${formatClockTime(new Date(loginMs))}</strong> &nbsp;&rarr;&nbsp; 🕔 Reg. End: <strong>${isWeekend ? 'N/A (Holiday)' : formatClockTime(new Date(regularEndMs))}</strong></span>
             <span>Task Time: ${formatMinutesToHHMM(activeMs)}</span>
           </div>
         `;
@@ -314,13 +331,11 @@ document.addEventListener('DOMContentLoaded', () => {
       const card = document.createElement('div');
       card.className = 'summary-card';
       card.innerHTML = `<h3>${title} <br><span style="font-size:0.85rem; color:#ef4444;">Total Tracked Overtime: ${formatMinutesToHHMM(overtimeMs)}</span></h3>`;
-
       if (Object.keys(totalsObj).length === 0) {
         card.innerHTML += '<p style="color:#94a3b8; font-style:italic;">No active tasks tracked.</p>';
         summaryList.appendChild(card);
         return;
       }
-
       const ul = document.createElement('ul');
       Object.entries(totalsObj).sort((a, b) => b[1] - a[1]).forEach(([taskTitle, ms]) => {
         const li = document.createElement('li');
@@ -345,19 +360,30 @@ document.addEventListener('DOMContentLoaded', () => {
     createSummaryCard(`🗓️ Monthly Task Breakdown`, monthlyTotals, totalMonthActive, totalMonthlyOvertimeMs);
   }
 
-  // --- UI CONTROLS (Edit Mode & Navigation) ---
-  
-  const toggleEditBtn = document.getElementById('toggleEditBtn');
-  if (toggleEditBtn) {
-    toggleEditBtn.onclick = () => {
-      document.body.classList.toggle('edit-mode-active');
-      if (document.body.classList.contains('edit-mode-active')) {
-        toggleEditBtn.textContent = "✅ Disable Edit Mode";
-      } else {
-        toggleEditBtn.textContent = "✏️ Enable Edit Mode";
+  // --- UI CONTROLS ---
+
+  document.getElementById('manageHolidaysBtn').onclick = () => {
+    let dateStr = prompt("Enter a Holiday Date (YYYY-MM-DD): \n\nCurrently assigned holidays:\n" + (holidays.join(', ') || "None"));
+    if (dateStr && dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      if (!holidays.includes(dateStr)) {
+        holidays.push(dateStr);
+        localStorage.setItem('holidays', JSON.stringify(holidays));
+        alert("Holiday added! Re-rendering dashboard.");
+        const weekStart = getWeekStartFromInput(weekSelector.value);
+        renderDashboard(weekStart); 
       }
-    };
-  }
+    } else if (dateStr) {
+      alert("Invalid format. Must be YYYY-MM-DD");
+    }
+  };
+
+  // SECRET EDIT MODE (Ctrl + E)
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.key.toLowerCase() === 'e') {
+      e.preventDefault();
+      document.body.classList.toggle('edit-mode-active');
+    }
+  });
 
   function changeWeekBy(offset) {
     if(!weekSelector) return;
@@ -369,13 +395,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const prevWeekBtn = document.getElementById('prevWeekBtn');
   if (prevWeekBtn) prevWeekBtn.onclick = () => changeWeekBy(-1);
-
   const nextWeekBtn = document.getElementById('nextWeekBtn');
   if (nextWeekBtn) nextWeekBtn.onclick = () => changeWeekBy(1);
 
 
   // --- DRAG TO RESIZE LOGIC ---
   let dragState = null;
+  const dragGuide = document.getElementById('dragGuide');
+  const dragGuideTime = document.getElementById('dragGuideTime');
 
   function startDragResize(e, taskId, historyIndex, edge) {
     if(!document.body.classList.contains('edit-mode-active')) return;
@@ -395,22 +422,39 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     document.body.classList.add('is-dragging');
+    dragGuide.style.display = 'block';
+    dragGuide.style.top = e.clientY + 'px';
+    
     document.addEventListener('mousemove', onDragResize);
     document.addEventListener('mouseup', stopDragResize);
   }
 
   function onDragResize(e) {
     if (!dragState) return;
+    const deltaY = e.clientY - dragState.startY;
+    const timeShiftMs = deltaY * 60 * 1000; 
+
+    let previewMs;
+    if (dragState.edge === 'top') {
+        previewMs = dragState.originalStartMs + timeShiftMs;
+    } else {
+        previewMs = dragState.originalEndMs + timeShiftMs;
+    }
+
+    dragGuide.style.top = e.clientY + 'px';
+    dragGuideTime.textContent = formatClockTime(new Date(previewMs));
   }
 
   function stopDragResize(e) {
     if (!dragState) return;
     document.body.classList.remove('is-dragging');
+    dragGuide.style.display = 'none';
+    
     document.removeEventListener('mousemove', onDragResize);
     document.removeEventListener('mouseup', stopDragResize);
 
     const deltaY = e.clientY - dragState.startY;
-    const timeShiftMs = deltaY * 60 * 1000; // 1px = 1 minute
+    const timeShiftMs = deltaY * 60 * 1000; 
 
     const startEntry = dragState.taskRef.history[dragState.index];
     const endEntry = dragState.taskRef.history[dragState.index + 1];
@@ -451,7 +495,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const modal = document.getElementById('editTimeModal');
   const startTimeInput = document.getElementById('editStartTime');
   const endTimeInput = document.getElementById('editEndTime');
-  const warningText = document.getElementById('editTimeWarning');
 
   function toInputTime(date) { return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`; }
   function applyTimeToDate(baseDate, timeString) {
@@ -479,11 +522,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (endEntry && endEntry.timestamp) {
       endTimeInput.value = toInputTime(new Date(endEntry.timestamp));
       endTimeInput.disabled = false;
-      warningText.style.display = 'none';
     } else {
       endTimeInput.value = "";
       endTimeInput.disabled = true;
-      warningText.style.display = 'block';
     }
     modal.style.display = 'flex';
   };
@@ -492,7 +533,6 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('cancelEditBtn').onclick = () => modal.style.display = 'none';
       document.getElementById('saveEditBtn').onclick = () => {
         if (!window.editingTaskRef || window.editingHistoryIndex === null) return;
-
         const startEntry = window.editingTaskRef.history[window.editingHistoryIndex];
         const endEntry = window.editingTaskRef.history[window.editingHistoryIndex + 1];
 
@@ -512,7 +552,6 @@ document.addEventListener('DOMContentLoaded', () => {
         window.editingTaskRef.lastModified = Date.now();
         localStorage.setItem('tasks', JSON.stringify(tasks));
         modal.style.display = 'none';
-        
         const weekStart = getWeekStartFromInput(weekSelector.value);
         renderDashboard(weekStart); 
       };
