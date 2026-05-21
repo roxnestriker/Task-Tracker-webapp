@@ -16,13 +16,10 @@
       <button id="prevWeekBtn" class="btn-nav">&larr; Prev Week</button>
       <div class="week-selector-wrapper">
         <label for="week-selector">Select Week:</label>
-        <input type="week" id="week-selector" name="week-selector" />
+        <input type="week" id="week-selector" name="week-selector" lang="en-GB" />
       </div>
       <button id="nextWeekBtn" class="btn-nav">Next Week &rarr;</button>
-    </div>
-
-    <div class="edit-controls">
-      <button id="toggleEditBtn" class="btn-outline">✏️ Enable Edit Mode</button>
+      <button id="manageHolidaysBtn" class="btn-outline" style="margin-top: 0; margin-left: 15px;">🌴 Holidays</button>
     </div>
   </header>
 
@@ -52,6 +49,10 @@
     </section>
   </main>
 
+  <div id="dragGuide" class="drag-guide" style="display: none;">
+    <div id="dragGuideTime" class="drag-guide-time">00:00</div>
+  </div>
+
   <div id="editTimeModal" class="modal-overlay" style="display: none;">
     <div class="modal-content">
       <h3 id="editModalTitle">Edit Task Time</h3>
@@ -61,10 +62,6 @@
         
         <label>End Time:</label>
         <input type="time" id="editEndTime" />
-        
-        <p id="editTimeWarning" class="warning-text" style="display: none;">
-          *This task is currently running. You can only edit the start time.
-        </p>
       </div>
       <div class="modal-actions">
         <button id="cancelEditBtn" class="btn-cancel">Cancel</button>
