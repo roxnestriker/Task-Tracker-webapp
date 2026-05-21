@@ -196,3 +196,25 @@ footer {
   border-radius: 8px;
   font-size: 0.85rem;
 }
+/* --- EDIT TIME MODAL STYLES --- */
+.modal-overlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex; justify-content: center; align-items: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: white; padding: 25px; border-radius: 8px;
+  width: 350px; box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+}
+
+.modal-content h3 { margin-top: 0; border-bottom: 1px solid #eee; padding-bottom: 10px; }
+
+.modal-body { display: flex; flex-direction: column; gap: 10px; margin: 15px 0; }
+.modal-body label { font-size: 0.9rem; font-weight: 600; color: #555; }
+.modal-body input[type="time"] { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 1rem; }
+
+.modal-actions { display: flex; justify-content: space-between; margin-top: 20px; }
+.btn-save { background: #27ae60; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+.btn-cancel { background: #95a5a6; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; }
