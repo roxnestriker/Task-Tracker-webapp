@@ -10,8 +10,9 @@ document.addEventListener('DOMContentLoaded', () => {
     tasks = [];
   }
 
-  const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  // UPDATED: Shifted to Monday -> Sunday
+  const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+  const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
   const MAX_MS_PER_SLOT = 30 * 60 * 1000;
   
   const timeSlots = [];
@@ -38,26 +39,25 @@ document.addEventListener('DOMContentLoaded', () => {
     return `${hours}:${minutes} ${ampm}`;
   }
 
+  // CORRECTED: Native ISO Standard (Starts on Monday)
   function getWeekStartFromInput(value) {
     if (!value || !value.includes('-W')) {
       const today = new Date();
-      today.setDate(today.getDate() - today.getDay()); 
-      today.setHours(0, 0, 0, 0);
-      return today;
+      // Calculate current week's Monday
+      const day = today.getDay(), diff = today.getDate() - day + (day == 0 ? -6:1);
+      return new Date(today.setDate(diff));
     }
     const [year, week] = value.split('-W');
     const jan4 = new Date(year, 0, 4);
     const dayOfWeek = jan4.getDay() || 7;
     const weekStart = new Date(jan4);
-    weekStart.setDate(jan4.getDate() - dayOfWeek + (parseInt(week) - 1) * 7);
+    weekStart.setDate(jan4.getDate() - dayOfWeek + 1 + (parseInt(week) - 1) * 7);
     weekStart.setHours(0, 0, 0, 0); 
     return weekStart;
   }
 
   function renderDashboard(weekStart) {
     const weekEnd = new Date(weekStart.getTime() + 7 * 86400000);
-    
-    // --- THE FIX: Define 'now' so the script doesn't crash! ---
     const now = new Date(weekStart); 
 
     days.forEach((day, i) => {
@@ -138,8 +138,13 @@ document.addEventListener('DOMContentLoaded', () => {
           const shiftEndMs = dailyShiftData[dateKey] ? dailyShiftData[dateKey].regularEndMs : 0;
 
           if (start >= weekStart && start < weekEnd) {
+            
+            // Map Sunday (0) to 6, Monday (1) to 0, etc. for our new grid
+            let sysDay = start.getDay();
+            let colIndex = sysDay === 0 ? 6 : sysDay - 1;
+
             summaryTotals[task.title] = (summaryTotals[task.title] || 0) + duration;
-            dailyActiveMs[start.getDay()] += duration;
+            dailyActiveMs[colIndex] += duration;
             totalWeeklyActiveTime += duration;
 
             let otForThisChunk = 0;
@@ -150,7 +155,7 @@ document.addEventListener('DOMContentLoaded', () => {
                   otForThisChunk = end.getTime() - shiftEndMs; 
               }
             }
-            dailyOTMs[start.getDay()] += otForThisChunk;
+            dailyOTMs[colIndex] += otForThisChunk;
             totalWeeklyOvertimeMs += otForThisChunk;
 
             let currentStart = new Date(start);
@@ -166,12 +171,14 @@ document.addEventListener('DOMContentLoaded', () => {
               const durationMs = chunkEnd - currentStart;
 
               if (durationMs > 0) {
-                const day = currentStart.getDay();
+                let currentSysDay = currentStart.getDay();
+                let currentColIndex = currentSysDay === 0 ? 6 : currentSysDay - 1;
+
                 const hour = currentStart.getHours();
                 const minute = currentStart.getMinutes();
                 
                 const slotStr = `${hour.toString().padStart(2, '0')}${minute < 30 ? '00' : '30'}`;
-                const cell = document.getElementById(`cell-${day}-${slotStr}`);
+                const cell = document.getElementById(`cell-${currentColIndex}-${slotStr}`);
 
                 if (cell) {
                   const slotStart = new Date(currentStart);
@@ -184,12 +191,12 @@ document.addEventListener('DOMContentLoaded', () => {
                   segment.className = 'task-segment';
                   segment.style.top = `${startOffsetPct}%`;
                   segment.style.height = `${heightPct}%`;
-                  segment.style.zIndex = "50"; 
                   segment.textContent = task.title;
                   segment.title = `${task.title}\n⏱️ Active: ${formatMinutesToHHMM(durationMs)}`;
                   
-                  // --- CLICK TO EDIT ---
+                  // --- CLICK TO EDIT (Only works in Edit Mode) ---
                   segment.onclick = (e) => {
+                      if(!document.body.classList.contains('edit-mode-active')) return;
                       if(e.target.classList.contains('resize-handle')) return; 
                       window.openEditModal(task.id, i, currentStart);
                   };
@@ -282,35 +289,34 @@ document.addEventListener('DOMContentLoaded', () => {
         const li = document.createElement('li');
         li.style.flexDirection = "column";
         li.style.alignItems = "flex-start";
-        li.style.gap = "4px";
-        li.style.borderBottom = "1px solid #eee";
-        li.style.paddingBottom = "8px";
+        li.style.borderBottom = "1px solid #f1f5f9";
+        li.style.paddingBottom = "12px";
 
         li.innerHTML = `
-          <div style="width: 100%; display: flex; justify-content: space-between;">
-            <strong>${dayNames[d]} (${currentDay.toLocaleDateString()})</strong>
-            ${overtimeMs > 0 ? `<span class="overtime-badge">⚠️ ${formatMinutesToHHMM(overtimeMs)} Active OT</span>` : `<span style="color: #27ae60; font-size: 0.8rem; font-weight: bold;">Standard Shift</span>`}
+          <div style="width: 100%; display: flex; justify-content: space-between; margin-bottom: 5px;">
+            <strong style="color: #1e293b;">${dayNames[d]} (${currentDay.toLocaleDateString()})</strong>
+            ${overtimeMs > 0 ? `<span class="overtime-badge">⚠️ ${formatMinutesToHHMM(overtimeMs)} Active OT</span>` : `<span style="color: #10b981; font-size: 0.75rem; font-weight: 700;">Standard Shift</span>`}
           </div>
-          <div style="font-size: 0.85rem; color: #555; width: 100%; display: flex; justify-content: space-between;">
-            <span>🕘 First Activity: <strong>${formatClockTime(new Date(loginMs))}</strong> &nbsp;&rarr;&nbsp; 🕔 Reg. Hours End: <strong>${formatClockTime(new Date(regularEndMs))}</strong></span>
-            <span>Total Tracked Task Time: ${formatMinutesToHHMM(activeMs)}</span>
+          <div style="font-size: 0.85rem; color: #64748b; width: 100%; display: flex; justify-content: space-between;">
+            <span>🕘 Login: <strong>${formatClockTime(new Date(loginMs))}</strong> &nbsp;&rarr;&nbsp; 🕔 Reg. End: <strong>${formatClockTime(new Date(regularEndMs))}</strong></span>
+            <span>Task Time: ${formatMinutesToHHMM(activeMs)}</span>
           </div>
         `;
         dailyUl.appendChild(li);
       }
     }
     
-    if (!hasDailyData) dailyUl.innerHTML = '<li style="color:#888; font-style:italic;">No tasks tracked this week.</li>';
+    if (!hasDailyData) dailyUl.innerHTML = '<li style="color:#94a3b8; font-style:italic;">No tasks tracked this week.</li>';
     dailySection.appendChild(dailyUl);
     summaryList.appendChild(dailySection);
 
     const createSummaryCard = (title, totalsObj, totalActiveTime, overtimeMs) => {
       const card = document.createElement('div');
       card.className = 'summary-card';
-      card.innerHTML = `<h3>${title} <br><span style="font-size:0.85rem; color:#e74c3c;">Total Tracked Overtime: ${formatMinutesToHHMM(overtimeMs)}</span></h3>`;
+      card.innerHTML = `<h3>${title} <br><span style="font-size:0.85rem; color:#ef4444;">Total Tracked Overtime: ${formatMinutesToHHMM(overtimeMs)}</span></h3>`;
 
       if (Object.keys(totalsObj).length === 0) {
-        card.innerHTML += '<p style="color:#888; font-style:italic;">No active tasks tracked.</p>';
+        card.innerHTML += '<p style="color:#94a3b8; font-style:italic;">No active tasks tracked.</p>';
         summaryList.appendChild(card);
         return;
       }
@@ -323,7 +329,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const percentage = totalActiveTime > 0 ? ((ms / totalActiveTime) * 100).toFixed(1) : 0;
         li.innerHTML = `
           <div style="display: flex; justify-content: space-between; font-weight: 500;">
-            <span>${taskTitle}</span><span>${formatMinutesToHHMM(ms)} (${percentage}%)</span>
+            <span style="color: #334155;">${taskTitle}</span><span style="color: #64748b;">${formatMinutesToHHMM(ms)} (${percentage}%)</span>
           </div>
           <div class="progress-container"><div class="progress-bar" style="width: ${percentage}%"></div></div>
         `;
@@ -339,10 +345,40 @@ document.addEventListener('DOMContentLoaded', () => {
     createSummaryCard(`🗓️ Monthly Task Breakdown`, monthlyTotals, totalMonthActive, totalMonthlyOvertimeMs);
   }
 
+  // --- UI CONTROLS (Edit Mode & Navigation) ---
+  
+  const toggleEditBtn = document.getElementById('toggleEditBtn');
+  if (toggleEditBtn) {
+    toggleEditBtn.onclick = () => {
+      document.body.classList.toggle('edit-mode-active');
+      if (document.body.classList.contains('edit-mode-active')) {
+        toggleEditBtn.textContent = "✅ Disable Edit Mode";
+      } else {
+        toggleEditBtn.textContent = "✏️ Enable Edit Mode";
+      }
+    };
+  }
+
+  function changeWeekBy(offset) {
+    if(!weekSelector) return;
+    const currentWeekStart = getWeekStartFromInput(weekSelector.value);
+    currentWeekStart.setDate(currentWeekStart.getDate() + (offset * 7));
+    weekSelector.value = `${currentWeekStart.getFullYear()}-W${getISOWeek(currentWeekStart).toString().padStart(2, '0')}`;
+    renderDashboard(currentWeekStart);
+  }
+
+  const prevWeekBtn = document.getElementById('prevWeekBtn');
+  if (prevWeekBtn) prevWeekBtn.onclick = () => changeWeekBy(-1);
+
+  const nextWeekBtn = document.getElementById('nextWeekBtn');
+  if (nextWeekBtn) nextWeekBtn.onclick = () => changeWeekBy(1);
+
+
   // --- DRAG TO RESIZE LOGIC ---
   let dragState = null;
 
   function startDragResize(e, taskId, historyIndex, edge) {
+    if(!document.body.classList.contains('edit-mode-active')) return;
     e.preventDefault(); 
     e.stopPropagation();
 
@@ -374,7 +410,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.removeEventListener('mouseup', stopDragResize);
 
     const deltaY = e.clientY - dragState.startY;
-    const timeShiftMs = deltaY * 60 * 1000; 
+    const timeShiftMs = deltaY * 60 * 1000; // 1px = 1 minute
 
     const startEntry = dragState.taskRef.history[dragState.index];
     const endEntry = dragState.taskRef.history[dragState.index + 1];
