@@ -5,6 +5,9 @@ document.addEventListener('DOMContentLoaded', () => {
   let tasks = [];
   let holidays = [];
   
+  // THE NEW UNDO STACK
+  let undoStack = [];
+  
   try {
     tasks = JSON.parse(localStorage.getItem('tasks')) || [];
     holidays = JSON.parse(localStorage.getItem('holidays')) || [];
@@ -368,11 +371,52 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
-  // SECRET EDIT MODE (Ctrl + E)
+
+  // --- SECRET EDIT MODE (Ctrl+E) & UNDO (Ctrl+Z) ---
   document.addEventListener('keydown', (e) => {
+    
+    // Ctrl + E (Toggle Edit Mode and Batch Save)
     if (e.ctrlKey && e.key.toLowerCase() === 'e') {
       e.preventDefault();
-      document.body.classList.toggle('edit-mode-active');
+      const isCurrentlyEditing = document.body.classList.contains('edit-mode-active');
+      
+      if (isCurrentlyEditing) {
+          // WE ARE EXITING EDIT MODE -> Ask to Save
+          if (undoStack.length > 1) {
+              if (confirm("Save all changes made during this edit session?")) {
+                  // User confirmed: Save to local storage
+                  localStorage.setItem('tasks', JSON.stringify(tasks));
+              } else {
+                  // User cancelled: Revert to the snapshot at index 0
+                  tasks = JSON.parse(undoStack[0]);
+                  const weekStart = getWeekStartFromInput(weekSelector.value);
+                  renderDashboard(weekStart);
+              }
+          }
+          document.body.classList.remove('edit-mode-active');
+          undoStack = []; // Clear stack when done
+      } else {
+          // WE ARE ENTERING EDIT MODE -> Take initial snapshot
+          document.body.classList.add('edit-mode-active');
+          undoStack = [JSON.stringify(tasks)]; // Push original state to stack
+      }
+    }
+
+    // Ctrl + Z (Undo Last Action)
+    if (e.ctrlKey && e.key.toLowerCase() === 'z') {
+        if (document.body.classList.contains('edit-mode-active')) {
+            e.preventDefault();
+            if (undoStack.length > 1) {
+                undoStack.pop(); // Remove the most recent mistake
+                tasks = JSON.parse(undoStack[undoStack.length - 1]); // Restore previous step
+                
+                const modal = document.getElementById('editTimeModal');
+                if (modal) modal.style.display = 'none'; // Close modal just in case
+                
+                const weekStart = getWeekStartFromInput(weekSelector.value);
+                renderDashboard(weekStart);
+            }
+        }
     }
   });
 
@@ -390,7 +434,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (nextWeekBtn) nextWeekBtn.onclick = () => changeWeekBy(1);
 
 
-  // --- DRAG TO RESIZE & UNDO LOGIC ---
+  // --- DRAG TO RESIZE LOGIC ---
   let dragState = null;
   const dragGuide = document.getElementById('dragGuide');
   const dragGuideTime = document.getElementById('dragGuideTime');
@@ -447,7 +491,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const deltaY = e.clientY - dragState.startY;
     const timeShiftMs = deltaY * 60 * 1000; 
     
-    // If you barely moved the mouse, just cancel and do nothing
+    // Only register drag if it moved substantially (more than 1 minute)
     if (Math.abs(timeShiftMs) < 60000) {
         dragState = null;
         return;
@@ -456,55 +500,38 @@ document.addEventListener('DOMContentLoaded', () => {
     const startEntry = dragState.taskRef.history[dragState.index];
     const endEntry = dragState.taskRef.history[dragState.index + 1];
 
-    let oldTimestamp;
-    let newTimestampMs;
-
     if (dragState.edge === 'top') {
-        oldTimestamp = startEntry.timestamp;
-        newTimestampMs = dragState.originalStartMs + timeShiftMs;
-        if (!dragState.originalEndMs || newTimestampMs < dragState.originalEndMs) {
-            startEntry.timestamp = new Date(newTimestampMs).toISOString();
-        } else {
-            dragState = null; return; // Dragged past the end
-        }
+        const newStartMs = dragState.originalStartMs + timeShiftMs;
+        if (!dragState.originalEndMs || newStartMs < dragState.originalEndMs) {
+            startEntry.timestamp = new Date(newStartMs).toISOString();
+        } else { dragState = null; return; }
     } else if (dragState.edge === 'bottom' && endEntry) {
-        oldTimestamp = endEntry.timestamp;
-        newTimestampMs = dragState.originalEndMs + timeShiftMs;
-        if (newTimestampMs > dragState.originalStartMs) {
-            endEntry.timestamp = new Date(newTimestampMs).toISOString();
-        } else {
-            dragState = null; return; // Dragged past the start
-        }
+        const newEndMs = dragState.originalEndMs + timeShiftMs;
+        if (newEndMs > dragState.originalStartMs) {
+            endEntry.timestamp = new Date(newEndMs).toISOString();
+        } else { dragState = null; return; }
     }
 
-    // --- UNDO CONFIRMATION ---
-    const userConfirmed = confirm(`Do you want to save this new time?\n\nNew Time: ${formatClockTime(new Date(newTimestampMs))}`);
-    
-    if (userConfirmed) {
-        // Save it!
-        let newTotalMs = 0;
-        for (let i = 0; i < dragState.taskRef.history.length; i++) {
-          const entry = dragState.taskRef.history[i];
-          if (entry.action.includes('Start') || entry.action === 'Resume') {
-            const s = new Date(entry.timestamp);
-            const eTime = dragState.taskRef.history[i+1] ? new Date(dragState.taskRef.history[i+1].timestamp) : new Date();
-            newTotalMs += (eTime - s);
-          }
-        }
-        dragState.taskRef.timeTracked = newTotalMs;
-        dragState.taskRef.lastModified = Date.now();
-        localStorage.setItem('tasks', JSON.stringify(tasks));
-    } else {
-        // UNDO - Reset to the old timestamp
-        if (dragState.edge === 'top') {
-            startEntry.timestamp = oldTimestamp;
-        } else {
-            endEntry.timestamp = oldTimestamp;
-        }
+    // Recalculate Time Tracked for this task
+    let newTotalMs = 0;
+    for (let i = 0; i < dragState.taskRef.history.length; i++) {
+      const entry = dragState.taskRef.history[i];
+      if (entry.action.includes('Start') || entry.action === 'Resume') {
+        const s = new Date(entry.timestamp);
+        const eTime = dragState.taskRef.history[i+1] ? new Date(dragState.taskRef.history[i+1].timestamp) : new Date();
+        newTotalMs += (eTime - s);
+      }
     }
+    dragState.taskRef.timeTracked = newTotalMs;
+    dragState.taskRef.lastModified = Date.now();
+
+    // Add this new state to the Undo Stack (We DO NOT save to localStorage yet)
+    undoStack.push(JSON.stringify(tasks));
     
+    // Refresh the view
     const weekStart = getWeekStartFromInput(weekSelector.value);
     renderDashboard(weekStart); 
+    
     dragState = null;
   }
 
@@ -549,16 +576,13 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   if (modal) {
-      // DELETE SESSION LOGIC
       if (deleteSessionBtn) {
           deleteSessionBtn.onclick = () => {
               if (!window.editingTaskRef || window.editingHistoryIndex === null) return;
               
-              if (confirm("Are you sure you want to permanently delete this task session? This cannot be undone.")) {
-                  // Remove the start and end entries from the array
+              if (confirm("Remove this session? (You can Undo this by pressing Ctrl+Z)")) {
                   window.editingTaskRef.history.splice(window.editingHistoryIndex, 2);
                   
-                  // Recalculate time
                   let newTotalMs = 0;
                   for (let i = 0; i < window.editingTaskRef.history.length; i++) {
                     const entry = window.editingTaskRef.history[i];
@@ -571,7 +595,8 @@ document.addEventListener('DOMContentLoaded', () => {
                   window.editingTaskRef.timeTracked = newTotalMs;
                   window.editingTaskRef.lastModified = Date.now();
                   
-                  localStorage.setItem('tasks', JSON.stringify(tasks));
+                  // Add to Undo Stack instead of local storage
+                  undoStack.push(JSON.stringify(tasks));
                   modal.style.display = 'none';
                   
                   const weekStart = getWeekStartFromInput(weekSelector.value);
@@ -601,8 +626,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         window.editingTaskRef.timeTracked = newTotalMs;
         window.editingTaskRef.lastModified = Date.now();
-        localStorage.setItem('tasks', JSON.stringify(tasks));
+        
+        // Add to Undo Stack instead of local storage
+        undoStack.push(JSON.stringify(tasks));
         modal.style.display = 'none';
+        
         const weekStart = getWeekStartFromInput(weekSelector.value);
         renderDashboard(weekStart); 
       };
