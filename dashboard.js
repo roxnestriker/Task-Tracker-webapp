@@ -85,7 +85,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const dailyShiftData = {};
     
-    // Find absolute Login Times
     tasks.forEach(task => {
       if (!task.history) return;
       for (let i = 0; i < task.history.length; i++) {
@@ -97,8 +96,6 @@ document.addEventListener('DOMContentLoaded', () => {
           const dateKey = `${d.getFullYear()}-${(d.getMonth()+1).toString().padStart(2,'0')}-${d.getDate().toString().padStart(2,'0')}`;
           const timeMs = d.getTime();
 
-          // HOLIDAY & WEEKEND LOGIC
-          // 0 = Sunday, 6 = Saturday
           let isOvertimeDay = (d.getDay() === 0 || d.getDay() === 6 || holidays.includes(dateKey));
 
           if (!dailyShiftData[dateKey]) {
@@ -191,23 +188,19 @@ document.addEventListener('DOMContentLoaded', () => {
                   segment.textContent = task.title;
                   segment.title = `${task.title}\n⏱️ Active: ${formatMinutesToHHMM(durationMs)}`;
                   
-                  // GLASSMORPHISM DYNAMIC OVERTIME COLORS
                   const isWeekend = currentSysDay === 0 || currentSysDay === 6 || holidays.includes(dateKey);
                   
                   if (isWeekend || currentStart.getTime() >= shiftEndMs) {
-                    // 100% OVERTIME (Red Glass)
                     segment.style.background = 'rgba(239, 68, 68, 0.4)';
                     segment.style.borderLeftColor = '#ef4444';
                   } else if (chunkEnd.getTime() <= shiftEndMs) {
-                    // 100% REGULAR (Green Glass - Default)
+                    // Default green
                   } else {
-                    // CROSSED THE BOUNDARY (Gradient Glass)
                     const regMs = shiftEndMs - currentStart.getTime();
                     const otPct = (regMs / durationMs) * 100;
                     segment.style.background = `linear-gradient(to bottom, rgba(52, 211, 153, 0.4) ${otPct}%, rgba(239, 68, 68, 0.4) ${otPct}%)`;
                   }
 
-                  // CLICK TO EDIT (Requires Secret Mode)
                   segment.onclick = (e) => {
                       if(!document.body.classList.contains('edit-mode-active')) return;
                       if(e.target.classList.contains('resize-handle')) return; 
@@ -246,7 +239,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
 
-    // Draw Background limits
     for (let d = 0; d < 7; d++) {
       const currentDay = new Date(weekStart);
       currentDay.setDate(currentDay.getDate() + d);
@@ -361,7 +353,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // --- UI CONTROLS ---
-
   document.getElementById('manageHolidaysBtn').onclick = () => {
     let dateStr = prompt("Enter a Holiday Date (YYYY-MM-DD): \n\nCurrently assigned holidays:\n" + (holidays.join(', ') || "None"));
     if (dateStr && dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
@@ -399,7 +390,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (nextWeekBtn) nextWeekBtn.onclick = () => changeWeekBy(1);
 
 
-  // --- DRAG TO RESIZE LOGIC ---
+  // --- DRAG TO RESIZE & UNDO LOGIC ---
   let dragState = null;
   const dragGuide = document.getElementById('dragGuide');
   const dragGuideTime = document.getElementById('dragGuideTime');
@@ -455,46 +446,74 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const deltaY = e.clientY - dragState.startY;
     const timeShiftMs = deltaY * 60 * 1000; 
+    
+    // If you barely moved the mouse, just cancel and do nothing
+    if (Math.abs(timeShiftMs) < 60000) {
+        dragState = null;
+        return;
+    }
 
     const startEntry = dragState.taskRef.history[dragState.index];
     const endEntry = dragState.taskRef.history[dragState.index + 1];
 
+    let oldTimestamp;
+    let newTimestampMs;
+
     if (dragState.edge === 'top') {
-        const newStartMs = dragState.originalStartMs + timeShiftMs;
-        if (!dragState.originalEndMs || newStartMs < dragState.originalEndMs) {
-            startEntry.timestamp = new Date(newStartMs).toISOString();
+        oldTimestamp = startEntry.timestamp;
+        newTimestampMs = dragState.originalStartMs + timeShiftMs;
+        if (!dragState.originalEndMs || newTimestampMs < dragState.originalEndMs) {
+            startEntry.timestamp = new Date(newTimestampMs).toISOString();
+        } else {
+            dragState = null; return; // Dragged past the end
         }
     } else if (dragState.edge === 'bottom' && endEntry) {
-        const newEndMs = dragState.originalEndMs + timeShiftMs;
-        if (newEndMs > dragState.originalStartMs) {
-            endEntry.timestamp = new Date(newEndMs).toISOString();
+        oldTimestamp = endEntry.timestamp;
+        newTimestampMs = dragState.originalEndMs + timeShiftMs;
+        if (newTimestampMs > dragState.originalStartMs) {
+            endEntry.timestamp = new Date(newTimestampMs).toISOString();
+        } else {
+            dragState = null; return; // Dragged past the start
         }
     }
 
-    let newTotalMs = 0;
-    for (let i = 0; i < dragState.taskRef.history.length; i++) {
-      const entry = dragState.taskRef.history[i];
-      if (entry.action.includes('Start') || entry.action === 'Resume') {
-        const s = new Date(entry.timestamp);
-        const eTime = dragState.taskRef.history[i+1] ? new Date(dragState.taskRef.history[i+1].timestamp) : new Date();
-        newTotalMs += (eTime - s);
-      }
+    // --- UNDO CONFIRMATION ---
+    const userConfirmed = confirm(`Do you want to save this new time?\n\nNew Time: ${formatClockTime(new Date(newTimestampMs))}`);
+    
+    if (userConfirmed) {
+        // Save it!
+        let newTotalMs = 0;
+        for (let i = 0; i < dragState.taskRef.history.length; i++) {
+          const entry = dragState.taskRef.history[i];
+          if (entry.action.includes('Start') || entry.action === 'Resume') {
+            const s = new Date(entry.timestamp);
+            const eTime = dragState.taskRef.history[i+1] ? new Date(dragState.taskRef.history[i+1].timestamp) : new Date();
+            newTotalMs += (eTime - s);
+          }
+        }
+        dragState.taskRef.timeTracked = newTotalMs;
+        dragState.taskRef.lastModified = Date.now();
+        localStorage.setItem('tasks', JSON.stringify(tasks));
+    } else {
+        // UNDO - Reset to the old timestamp
+        if (dragState.edge === 'top') {
+            startEntry.timestamp = oldTimestamp;
+        } else {
+            endEntry.timestamp = oldTimestamp;
+        }
     }
-    dragState.taskRef.timeTracked = newTotalMs;
-    dragState.taskRef.lastModified = Date.now();
-
-    localStorage.setItem('tasks', JSON.stringify(tasks));
     
     const weekStart = getWeekStartFromInput(weekSelector.value);
     renderDashboard(weekStart); 
-    
     dragState = null;
   }
 
-  // --- MANUAL EDIT MODAL ---
+
+  // --- MANUAL EDIT & DELETE MODAL ---
   const modal = document.getElementById('editTimeModal');
   const startTimeInput = document.getElementById('editStartTime');
   const endTimeInput = document.getElementById('editEndTime');
+  const deleteSessionBtn = document.getElementById('deleteSessionBtn');
 
   function toInputTime(date) { return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`; }
   function applyTimeToDate(baseDate, timeString) {
@@ -530,7 +549,39 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   if (modal) {
+      // DELETE SESSION LOGIC
+      if (deleteSessionBtn) {
+          deleteSessionBtn.onclick = () => {
+              if (!window.editingTaskRef || window.editingHistoryIndex === null) return;
+              
+              if (confirm("Are you sure you want to permanently delete this task session? This cannot be undone.")) {
+                  // Remove the start and end entries from the array
+                  window.editingTaskRef.history.splice(window.editingHistoryIndex, 2);
+                  
+                  // Recalculate time
+                  let newTotalMs = 0;
+                  for (let i = 0; i < window.editingTaskRef.history.length; i++) {
+                    const entry = window.editingTaskRef.history[i];
+                    if (entry.action.includes('Start') || entry.action === 'Resume') {
+                      const s = new Date(entry.timestamp);
+                      const eTime = window.editingTaskRef.history[i+1] ? new Date(window.editingTaskRef.history[i+1].timestamp) : new Date();
+                      newTotalMs += (eTime - s);
+                    }
+                  }
+                  window.editingTaskRef.timeTracked = newTotalMs;
+                  window.editingTaskRef.lastModified = Date.now();
+                  
+                  localStorage.setItem('tasks', JSON.stringify(tasks));
+                  modal.style.display = 'none';
+                  
+                  const weekStart = getWeekStartFromInput(weekSelector.value);
+                  renderDashboard(weekStart);
+              }
+          };
+      }
+
       document.getElementById('cancelEditBtn').onclick = () => modal.style.display = 'none';
+      
       document.getElementById('saveEditBtn').onclick = () => {
         if (!window.editingTaskRef || window.editingHistoryIndex === null) return;
         const startEntry = window.editingTaskRef.history[window.editingHistoryIndex];
@@ -567,10 +618,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   const today = new Date();
-  const week = getISOWeek(today);
   
   if (weekSelector) {
-    weekSelector.value = `${today.getFullYear()}-W${week.toString().padStart(2, '0')}`;
+    weekSelector.value = `${today.getFullYear()}-W${getISOWeek(today).toString().padStart(2, '0')}`;
     const weekStart = getWeekStartFromInput(weekSelector.value);
     renderDashboard(weekStart);
 
