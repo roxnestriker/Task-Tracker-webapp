@@ -90,3 +90,12 @@ body.is-dragging { user-select: none; cursor: ns-resize !important; }
 .btn-cancel { background: #f1f5f9; color: #475569; border: none; padding: 10px 20px; border-radius: 6px; font-weight: 600; cursor: pointer; }
 footer { text-align: center; padding: 30px; }
 .btn-back { background: #fff; color: #1e293b; padding: 10px 20px; border-radius: 8px; font-size: 1rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+/* Delete Session Button */
+.btn-delete { 
+  background: #fef2f2; color: #ef4444; border: 1px solid #fca5a5; 
+  padding: 10px 15px; border-radius: 6px; font-weight: 600; 
+  cursor: pointer; transition: all 0.2s; 
+}
+.btn-delete:hover { 
+  background: #ef4444; color: white; border-color: #ef4444; 
+}
