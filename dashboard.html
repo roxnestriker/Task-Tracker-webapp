@@ -1,82 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Dashboard - Task Tracker</title>
-  <link rel="stylesheet" href="dashboard.css" />
-  <script src="dashboard.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Task Tracker – Timeline</title>
+<meta http-equiv="refresh" content="0; url=index.html#timeline">
+<style>body{font:15px "Segoe UI",system-ui,sans-serif;margin:18vh auto;max-width:480px;text-align:center;color:#3d4657}@media (prefers-color-scheme: dark){body{background:#0c0f16;color:#c2c8d6}}</style>
 </head>
 <body>
-  <header>
-    <h1>📊 Weekly Task Heatmap</h1>
-    <p>Visual overview of task activity by time and day</p>
-    
-    <div class="dashboard-controls">
-      <button id="prevWeekBtn" class="btn-nav">&larr; Prev Week</button>
-      <div class="week-selector-wrapper">
-        <label for="week-selector">Select Week:</label>
-        <input type="week" id="week-selector" name="week-selector" lang="en-GB" />
-      </div>
-      <button id="nextWeekBtn" class="btn-nav">Next Week &rarr;</button>
-      <button id="manageHolidaysBtn" class="btn-outline" style="margin-top: 0; margin-left: 15px;">🌴 Holidays</button>
-    </div>
-  </header>
-
-  <main>
-    <section id="heatmapSection">
-      <table>
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Monday<br><span id="date-mon" class="date-subtext"></span></th>
-            <th>Tuesday<br><span id="date-tue" class="date-subtext"></span></th>
-            <th>Wednesday<br><span id="date-wed" class="date-subtext"></span></th>
-            <th>Thursday<br><span id="date-thu" class="date-subtext"></span></th>
-            <th>Friday<br><span id="date-fri" class="date-subtext"></span></th>
-            <th>Saturday<br><span id="date-sat" class="date-subtext"></span></th>
-            <th>Sunday<br><span id="date-sun" class="date-subtext"></span></th>
-          </tr>
-        </thead>
-        <tbody id="heatmapBody">
-          </tbody>
-      </table>
-    </section>
-
-    <section id="summarySection">
-      <h2>Weekly Insights</h2>
-      <div id="summaryList" class="summary-grid"></div>
-    </section>
-  </main>
-
-  <div id="dragGuide" class="drag-guide" style="display: none;">
-    <div id="dragGuideTime" class="drag-guide-time">00:00</div>
-  </div>
-
-  <div id="editTimeModal" class="modal-overlay" style="display: none;">
-    <div class="modal-content">
-      <h3 id="editModalTitle">Edit Task Time</h3>
-      <div class="modal-body">
-        <label>Start Time:</label>
-        <input type="time" id="editStartTime" />
-        
-        <label>End Time:</label>
-        <input type="time" id="editEndTime" />
-      </div>
-      
-      <div class="modal-actions">
-        <button id="deleteSessionBtn" class="btn-delete" title="Permanently delete this session">🗑️ Delete</button>
-        <div style="display: flex; gap: 10px;">
-          <button id="cancelEditBtn" class="btn-cancel">Cancel</button>
-          <button id="saveEditBtn" class="btn-save">Save</button>
-        </div>
-      </div>
-      
-    </div>
-  </div>
-
-  <footer>
-    <button onclick="window.close()" class="btn-back">🔙 Back to Tasks</button>
-  </footer>
+<p>The dashboard is now part of the tracker (Timeline, Timesheet and Insights tabs).</p>
+<p><a href="index.html#timeline">Open the Timeline</a></p>
 </body>
 </html>
